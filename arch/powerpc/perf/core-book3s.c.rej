@@ -1,0 +1,104 @@
+--- arch/powerpc/perf/core-book3s.c
++++ arch/powerpc/perf/core-book3s.c
+@@ -75,6 +75,11 @@ static unsigned int freeze_events_kernel = MMCR0_FCS;
+ 
+ #define MMCR0_FCHV		0
+ #define MMCR0_PMCjCE		MMCR0_PMCnCE
++#define MMCR0_FC56		0
++#define MMCR0_PMAO		0
++#define MMCR0_EBE		0
++#define MMCR0_PMCC		0
++#define MMCR0_PMCC_U6		0
+ 
+ #define SPRN_MMCRA		SPRN_MMCR2
+ #define MMCRA_SAMPLE_ENABLE	0
+@@ -951,7 +1055,7 @@ static void write_mmcr0(struct cpu_hw_events *cpuhw, unsigned long mmcr0)
+ static void power_pmu_disable(struct pmu *pmu)
+ {
+ 	struct cpu_hw_events *cpuhw;
+-	unsigned long flags;
++	unsigned long flags, mmcr0, val;
+ 
+ 	if (!ppmu)
+ 		return;
+@@ -959,9 +1063,6 @@ static void power_pmu_disable(struct pmu *pmu)
+ 	cpuhw = &__get_cpu_var(cpu_hw_events);
+ 
+ 	if (!cpuhw->disabled) {
+-		cpuhw->disabled = 1;
+-		cpuhw->n_added = 0;
+-
+ 		/*
+ 		 * Check if we ever enabled the PMU on this cpu.
+ 		 */
+@@ -994,15 +1110,12 @@ static void power_pmu_disable(struct pmu *pmu)
+ 			mb();
+ 		}
+ 
+-		/*
+-		 * Set the 'freeze counters' bit.
+-		 * The barrier is to make sure the mtspr has been
+-		 * executed and the PMU has frozen the events
+-		 * before we return.
+-		 */
+-		write_mmcr0(cpuhw, mfspr(SPRN_MMCR0) | MMCR0_FC);
+-		mb();
++		cpuhw->disabled = 1;
++		cpuhw->n_added = 0;
++
++		ebb_switch_out(mmcr0);
+ 	}
++
+ 	local_irq_restore(flags);
+ }
+ 
+@@ -1017,23 +1130,36 @@ static void power_pmu_enable(struct pmu *pmu)
+ 	struct cpu_hw_events *cpuhw;
+ 	unsigned long flags;
+ 	long i;
+-	unsigned long val;
++	unsigned long val, mmcr0;
+ 	s64 left;
+ 	unsigned int hwc_index[MAX_HWEVENTS];
+ 	int n_lim;
+ 	int idx;
++	bool ebb;
+ 
+ 	if (!ppmu)
+ 		return;
+ 	local_irq_save(flags);
++
+ 	cpuhw = &__get_cpu_var(cpu_hw_events);
+-	if (!cpuhw->disabled) {
+-		local_irq_restore(flags);
+-		return;
++	if (!cpuhw->disabled)
++		goto out;
++
++	if (cpuhw->n_events == 0) {
++		ppc_set_pmu_inuse(0);
++		goto out;
+ 	}
++
+ 	cpuhw->disabled = 0;
+ 
+ 	/*
++	 * EBB requires an exclusive group and all events must have the EBB
++	 * flag set, or not set, so we can just check a single event. Also we
++	 * know we have at least one event.
++	 */
++	ebb = is_ebb_event(cpuhw->event[0]);
++
++	/*
+ 	 * If we didn't change anything, or only removed events,
+ 	 * no need to recalculate MMCR* settings and reset the PMCs.
+ 	 * Just reenable the PMU with the current MMCR* settings
+@@ -1042,8 +1168,6 @@ static void power_pmu_enable(struct pmu *pmu)
+ 	if (!cpuhw->n_added) {
+ 		mtspr(SPRN_MMCRA, cpuhw->mmcr[2] & ~MMCRA_SAMPLE_ENABLE);
+ 		mtspr(SPRN_MMCR1, cpuhw->mmcr[1]);
+-		if (cpuhw->n_events == 0)
+-			ppc_set_pmu_inuse(0);
+ 		goto out_enable;
+ 	}
+ 

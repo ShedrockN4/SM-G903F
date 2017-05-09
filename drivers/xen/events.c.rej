@@ -1,0 +1,22 @@
+--- drivers/xen/events.c
++++ drivers/xen/events.c
+@@ -348,7 +350,7 @@ static void init_evtchn_cpu_bindings(void)
+ 
+ 	for_each_possible_cpu(i)
+ 		memset(per_cpu(cpu_evtchn_mask, i),
+-		       (i == 0) ? ~0 : 0, sizeof(*per_cpu(cpu_evtchn_mask, i)));
++		       (i == 0) ? ~0 : 0, NR_EVENT_CHANNELS/8);
+ }
+ 
+ static inline void clear_evtchn(int port)
+@@ -1493,8 +1494,10 @@ void rebind_evtchn_irq(int evtchn, int irq)
+ /* Rebind an evtchn so that it gets delivered to a specific cpu */
+ static int rebind_irq_to_cpu(unsigned irq, unsigned tcpu)
+ {
++	struct shared_info *s = HYPERVISOR_shared_info;
+ 	struct evtchn_bind_vcpu bind_vcpu;
+ 	int evtchn = evtchn_from_irq(irq);
++	int masked;
+ 
+ 	if (!VALID_EVTCHN(evtchn))
+ 		return -1;

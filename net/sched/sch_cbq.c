@@ -130,7 +130,7 @@ struct cbq_class {
 	psched_time_t		penalized;
 	struct gnet_stats_basic_packed bstats;
 	struct gnet_stats_queue qstats;
-	struct gnet_stats_rate_est rate_est;
+	struct gnet_stats_rate_est64 rate_est;
 	struct tc_cbq_xstats	xstats;
 
 	struct tcf_proto	*filter_list;
@@ -1439,6 +1439,7 @@ static int cbq_dump_lss(struct sk_buff *skb, struct cbq_class *cl)
 	unsigned char *b = skb_tail_pointer(skb);
 	struct tc_cbq_lssopt opt;
 
+	memset(&opt, 0, sizeof(opt));
 	opt.flags = 0;
 	if (cl->borrow == NULL)
 		opt.flags |= TCF_CBQ_LSS_BOUNDED;

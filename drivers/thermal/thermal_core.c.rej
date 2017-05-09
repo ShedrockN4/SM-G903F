@@ -1,0 +1,10 @@
+--- drivers/thermal/thermal_core.c
++++ drivers/thermal/thermal_core.c
+@@ -33,6 +33,7 @@
+ #include <linux/idr.h>
+ #include <linux/thermal.h>
+ #include <linux/reboot.h>
++#include <linux/string.h>
+ #include <net/netlink.h>
+ #include <net/genetlink.h>
+ 

@@ -1,0 +1,17 @@
+--- drivers/net/wireless/iwlwifi/mvm/ops.c
++++ drivers/net/wireless/iwlwifi/mvm/ops.c
+@@ -293,11 +298,14 @@ static const char *iwl_mvm_cmd_strings[REPLY_MAX] = {
+ 	CMD(NET_DETECT_HOTSPOTS_CMD),
+ 	CMD(NET_DETECT_HOTSPOTS_QUERY_CMD),
+ 	CMD(CARD_STATE_NOTIFICATION),
++	CMD(MISSED_BEACONS_NOTIFICATION),
+ 	CMD(BT_COEX_PRIO_TABLE),
+ 	CMD(BT_COEX_PROT_ENV),
+ 	CMD(BT_PROFILE_NOTIFICATION),
+ 	CMD(BT_CONFIG),
+ 	CMD(MCAST_FILTER_CMD),
++	CMD(REPLY_BEACON_FILTERING_CMD),
++	CMD(REPLY_THERMAL_MNG_BACKOFF),
+ };
+ #undef CMD
+ 

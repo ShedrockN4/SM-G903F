@@ -1,0 +1,23 @@
+--- Documentation/devicetree/bindings/pinctrl/samsung-pinctrl.txt
++++ Documentation/devicetree/bindings/pinctrl/samsung-pinctrl.txt
+@@ -26,8 +31,18 @@ Required Properties:
+ 
+   - gpio-controller: identifies the node as a gpio controller and pin bank.
+   - #gpio-cells: number of cells in GPIO specifier. Since the generic GPIO
+-    binding is used, the amount of cells must be specified as 2. See generic
+-    GPIO binding documentation for description of particular cells.
++    binding is used, the amount of cells must be specified as 2. See the below
++    mentioned gpio binding representation for description of particular cells.
++
++	Eg: <&gpx2 6 0>
++	<[phandle of the gpio controller node]
++	[pin number within the gpio controller]
++	[flags]>
++
++	Values for gpio specifier:
++	- Pin number: is a value between 0 to 7.
++	- Flags: 0 - Active High
++		 1 - Active Low
+ 
+ - Pin mux/config groups as child nodes: The pin mux (selecting pin function
+   mode) and pin config (pull up/down, driver strength) settings are represented

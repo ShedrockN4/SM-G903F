@@ -263,11 +263,10 @@ extern int udp4_proc_init(void);
 extern void udp4_proc_exit(void);
 #endif
 
+extern int udpv4_offload_init(void);
+
 extern void udp_init(void);
 
-extern int udp4_ufo_send_check(struct sk_buff *skb);
-extern struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb,
-	netdev_features_t features);
 extern void udp_encap_enable(void);
 #if IS_ENABLED(CONFIG_IPV6)
 extern void udpv6_encap_enable(void);

@@ -1,0 +1,131 @@
+--- fs/fuse/dir.c
++++ fs/fuse/dir.c
+@@ -1165,25 +1165,23 @@ static int fuse_permission(struct inode *inode, int mask)
+ }
+ 
+ static int parse_dirfile(char *buf, size_t nbytes, struct file *file,
+-			 void *dstbuf, filldir_t filldir)
++			 struct dir_context *ctx)
+ {
+ 	while (nbytes >= FUSE_NAME_OFFSET) {
+ 		struct fuse_dirent *dirent = (struct fuse_dirent *) buf;
+ 		size_t reclen = FUSE_DIRENT_SIZE(dirent);
+-		int over;
+ 		if (!dirent->namelen || dirent->namelen > FUSE_NAME_MAX)
+ 			return -EIO;
+ 		if (reclen > nbytes)
+ 			break;
+ 
+-		over = filldir(dstbuf, dirent->name, dirent->namelen,
+-			       file->f_pos, dirent->ino, dirent->type);
+-		if (over)
++		if (!dir_emit(ctx, dirent->name, dirent->namelen,
++			       dirent->ino, dirent->type))
+ 			break;
+ 
+ 		buf += reclen;
+ 		nbytes -= reclen;
+-		file->f_pos = dirent->off;
++		ctx->pos = dirent->off;
+ 	}
+ 
+ 	return 0;
+@@ -1225,30 +1223,46 @@ static int fuse_direntplus_link(struct file *file,
+ 		if (name.name[1] == '.' && name.len == 2)
+ 			return 0;
+ 	}
++
++	if (invalid_nodeid(o->nodeid))
++		return -EIO;
++	if (!fuse_valid_type(o->attr.mode))
++		return -EIO;
++
+ 	fc = get_fuse_conn(dir);
+ 
+ 	name.hash = full_name_hash(name.name, name.len);
+ 	dentry = d_lookup(parent, &name);
+-	if (dentry && dentry->d_inode) {
++	if (dentry) {
+ 		inode = dentry->d_inode;
+-		if (get_node_id(inode) == o->nodeid) {
++		if (!inode) {
++			d_drop(dentry);
++		} else if (get_node_id(inode) != o->nodeid ||
++			   ((o->attr.mode ^ inode->i_mode) & S_IFMT)) {
++			err = d_invalidate(dentry);
++			if (err)
++				goto out;
++		} else if (is_bad_inode(inode)) {
++			err = -EIO;
++			goto out;
++		} else {
+ 			struct fuse_inode *fi;
+ 			fi = get_fuse_inode(inode);
+ 			spin_lock(&fc->lock);
+ 			fi->nlookup++;
+ 			spin_unlock(&fc->lock);
+ 
++			fuse_change_attributes(inode, &o->attr,
++					       entry_attr_timeout(o),
++					       attr_version);
++
+ 			/*
+ 			 * The other branch to 'found' comes via fuse_iget()
+ 			 * which bumps nlookup inside
+ 			 */
+ 			goto found;
+ 		}
+-		err = d_invalidate(dentry);
+-		if (err)
+-			goto out;
+ 		dput(dentry);
+-		dentry = NULL;
+ 	}
+ 
+ 	dentry = d_alloc(parent, &name);
+@@ -1261,30 +1275,35 @@ static int fuse_direntplus_link(struct file *file,
+ 	if (!inode)
+ 		goto out;
+ 
+-	alias = d_materialise_unique(dentry, inode);
+-	err = PTR_ERR(alias);
+-	if (IS_ERR(alias))
+-		goto out;
++	if (S_ISDIR(inode->i_mode)) {
++		mutex_lock(&fc->inst_mutex);
++		alias = fuse_d_add_directory(dentry, inode);
++		mutex_unlock(&fc->inst_mutex);
++		err = PTR_ERR(alias);
++		if (IS_ERR(alias)) {
++			iput(inode);
++			goto out;
++		}
++	} else {
++		alias = d_splice_alias(inode, dentry);
++	}
++
+ 	if (alias) {
+ 		dput(dentry);
+ 		dentry = alias;
+ 	}
+ 
+ found:
+-	fuse_change_attributes(inode, &o->attr, entry_attr_timeout(o),
+-			       attr_version);
+-
+ 	fuse_change_entry_timeout(dentry, o);
+ 
+ 	err = 0;
+ out:
+-	if (dentry)
+-		dput(dentry);
++	dput(dentry);
+ 	return err;
+ }
+ 
+ static int parse_dirplusfile(char *buf, size_t nbytes, struct file *file,
+-			     void *dstbuf, filldir_t filldir, u64 attr_version)
++			     struct dir_context *ctx, u64 attr_version)
+ {
+ 	struct fuse_direntplus *direntplus;
+ 	struct fuse_dirent *dirent;

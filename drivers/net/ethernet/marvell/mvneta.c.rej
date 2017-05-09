@@ -1,0 +1,79 @@
+--- drivers/net/ethernet/marvell/mvneta.c
++++ drivers/net/ethernet/marvell/mvneta.c
+@@ -2732,29 +2746,43 @@ static int mvneta_probe(struct platform_device *pdev)
+ 
+ 	pp = netdev_priv(dev);
+ 
+-	pp->tx_done_timer.function = mvneta_tx_done_timer_callback;
+-	init_timer(&pp->tx_done_timer);
+-	clear_bit(MVNETA_F_TX_DONE_TIMER_BIT, &pp->flags);
+-
+ 	pp->weight = MVNETA_RX_POLL_WEIGHT;
+ 	pp->phy_node = phy_node;
+ 	pp->phy_interface = phy_mode;
+ 
+-	pp->base = of_iomap(dn, 0);
+-	if (pp->base == NULL) {
+-		err = -ENOMEM;
+-		goto err_free_irq;
+-	}
+-
+ 	pp->clk = devm_clk_get(&pdev->dev, NULL);
+ 	if (IS_ERR(pp->clk)) {
+ 		err = PTR_ERR(pp->clk);
+-		goto err_unmap;
++		goto err_free_irq;
+ 	}
+ 
+ 	clk_prepare_enable(pp->clk);
+ 
++	pp->base = of_iomap(dn, 0);
++	if (pp->base == NULL) {
++		err = -ENOMEM;
++		goto err_clk;
++	}
++
++	dt_mac_addr = of_get_mac_address(dn);
++	if (dt_mac_addr && is_valid_ether_addr(dt_mac_addr)) {
++		mac_from = "device tree";
++		memcpy(dev->dev_addr, dt_mac_addr, ETH_ALEN);
++	} else {
++		mvneta_get_mac_addr(pp, hw_mac_addr);
++		if (is_valid_ether_addr(hw_mac_addr)) {
++			mac_from = "hardware";
++			memcpy(dev->dev_addr, hw_mac_addr, ETH_ALEN);
++		} else {
++			mac_from = "random";
++			eth_hw_addr_random(dev);
++		}
++	}
++
+ 	pp->tx_done_timer.data = (unsigned long)dev;
++	pp->tx_done_timer.function = mvneta_tx_done_timer_callback;
++	init_timer(&pp->tx_done_timer);
++	clear_bit(MVNETA_F_TX_DONE_TIMER_BIT, &pp->flags);
+ 
+ 	pp->tx_ring_size = MVNETA_MAX_TXD;
+ 	pp->rx_ring_size = MVNETA_MAX_RXD;
+@@ -2765,7 +2793,7 @@ static int mvneta_probe(struct platform_device *pdev)
+ 	err = mvneta_init(pp, phy_addr);
+ 	if (err < 0) {
+ 		dev_err(&pdev->dev, "can't init eth hal\n");
+-		goto err_clk;
++		goto err_unmap;
+ 	}
+ 	mvneta_port_power_up(pp, phy_mode);
+ 
+@@ -2795,10 +2824,10 @@ static int mvneta_probe(struct platform_device *pdev)
+ 
+ err_deinit:
+ 	mvneta_deinit(pp);
+-err_clk:
+-	clk_disable_unprepare(pp->clk);
+ err_unmap:
+ 	iounmap(pp->base);
++err_clk:
++	clk_disable_unprepare(pp->clk);
+ err_free_irq:
+ 	irq_dispose_mapping(dev->irq);
+ err_free_netdev:

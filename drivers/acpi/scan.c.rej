@@ -1,0 +1,32 @@
+--- drivers/acpi/scan.c
++++ drivers/acpi/scan.c
+@@ -350,11 +464,14 @@ static void acpi_scan_bus_device_check(acpi_handle handle, u32 ost_source)
+ 	int error;
+ 
+ 	mutex_lock(&acpi_scan_lock);
++	lock_device_hotplug();
+ 
+-	acpi_bus_get_device(handle, &device);
+-	if (device) {
+-		dev_warn(&device->dev, "Attempt to re-insert\n");
+-		goto out;
++	if (ost_source != ACPI_NOTIFY_BUS_CHECK) {
++		acpi_bus_get_device(handle, &device);
++		if (device) {
++			dev_warn(&device->dev, "Attempt to re-insert\n");
++			goto out;
++		}
+ 	}
+ 	acpi_evaluate_hotplug_ost(handle, ost_source,
+ 				  ACPI_OST_SC_INSERT_IN_PROGRESS, NULL);
+@@ -2130,8 +2225,10 @@ int __init acpi_scan_init(void)
+ 
+ 	acpi_pci_root_init();
+ 	acpi_pci_link_init();
++	acpi_processor_init();
+ 	acpi_platform_init();
+ 	acpi_lpss_init();
++	acpi_cmos_rtc_init();
+ 	acpi_container_init();
+ 	acpi_memory_hotplug_init();
+ 	acpi_dock_init();

@@ -1,0 +1,20 @@
+--- fs/nfsd/nfs4xdr.c
++++ fs/nfsd/nfs4xdr.c
+@@ -179,16 +197,7 @@ static __be32 *read_buf(struct nfsd4_compoundargs *argp, u32 nbytes)
+ 	 * guarantee p points to at least nbytes bytes.
+ 	 */
+ 	memcpy(p, argp->p, avail);
+-	/* step to next page */
+-	argp->p = page_address(argp->pagelist[0]);
+-	argp->pagelist++;
+-	if (argp->pagelen < PAGE_SIZE) {
+-		argp->end = argp->p + (argp->pagelen>>2);
+-		argp->pagelen = 0;
+-	} else {
+-		argp->end = argp->p + (PAGE_SIZE>>2);
+-		argp->pagelen -= PAGE_SIZE;
+-	}
++	next_decode_page(argp);
+ 	memcpy(((char*)p)+avail, argp->p, (nbytes - avail));
+ 	argp->p += XDR_QUADLEN(nbytes - avail);
+ 	return p;

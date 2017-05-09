@@ -1,0 +1,179 @@
+--- net/sched/sch_htb.c
++++ net/sched/sch_htb.c
+@@ -76,95 +80,105 @@ enum htb_cmode {
+ 	HTB_CAN_SEND		/* class can send */
+ };
+ 
+-/* interior & leaf nodes; props specific to leaves are marked L: */
++struct htb_prio {
++	union {
++		struct rb_root	row;
++		struct rb_root	feed;
++	};
++	struct rb_node	*ptr;
++	/* When class changes from state 1->2 and disconnects from
++	 * parent's feed then we lost ptr value and start from the
++	 * first child again. Here we store classid of the
++	 * last valid ptr (used when ptr is NULL).
++	 */
++	u32		last_ptr_id;
++};
++
++/* interior & leaf nodes; props specific to leaves are marked L:
++ * To reduce false sharing, place mostly read fields at beginning,
++ * and mostly written ones at the end.
++ */
+ struct htb_class {
+ 	struct Qdisc_class_common common;
+-	/* general class parameters */
+-	struct gnet_stats_basic_packed bstats;
+-	struct gnet_stats_queue qstats;
+-	struct gnet_stats_rate_est rate_est;
+-	struct tc_htb_xstats xstats;	/* our special stats */
+-	int refcnt;		/* usage count of this class */
++	struct psched_ratecfg	rate;
++	struct psched_ratecfg	ceil;
++	s64			buffer, cbuffer;/* token bucket depth/rate */
++	s64			mbuffer;	/* max wait time */
++	u32			prio;		/* these two are used only by leaves... */
++	int			quantum;	/* but stored for parent-to-leaf return */
++
++	struct tcf_proto	*filter_list;	/* class attached filters */
++	int			filter_cnt;
++	int			refcnt;		/* usage count of this class */
++
++	int			level;		/* our level (see above) */
++	unsigned int		children;
++	struct htb_class	*parent;	/* parent class */
+ 
+-	/* topology */
+-	int level;		/* our level (see above) */
+-	unsigned int children;
+-	struct htb_class *parent;	/* parent class */
++	struct gnet_stats_rate_est64 rate_est;
+ 
+-	int prio;		/* these two are used only by leaves... */
+-	int quantum;		/* but stored for parent-to-leaf return */
++	/*
++	 * Written often fields
++	 */
++	struct gnet_stats_basic_packed bstats;
++	struct gnet_stats_queue	qstats;
++	struct tc_htb_xstats	xstats;	/* our special stats */
++
++	/* token bucket parameters */
++	s64			tokens, ctokens;/* current number of tokens */
++	s64			t_c;		/* checkpoint time */
+ 
+ 	union {
+ 		struct htb_class_leaf {
+-			struct Qdisc *q;
+-			int deficit[TC_HTB_MAXDEPTH];
+ 			struct list_head drop_list;
++			int		deficit[TC_HTB_MAXDEPTH];
++			struct Qdisc	*q;
+ 		} leaf;
+ 		struct htb_class_inner {
+-			struct rb_root feed[TC_HTB_NUMPRIO];	/* feed trees */
+-			struct rb_node *ptr[TC_HTB_NUMPRIO];	/* current class ptr */
+-			/* When class changes from state 1->2 and disconnects from
+-			 * parent's feed then we lost ptr value and start from the
+-			 * first child again. Here we store classid of the
+-			 * last valid ptr (used when ptr is NULL).
+-			 */
+-			u32 last_ptr_id[TC_HTB_NUMPRIO];
++			struct htb_prio clprio[TC_HTB_NUMPRIO];
+ 		} inner;
+ 	} un;
+-	struct rb_node node[TC_HTB_NUMPRIO];	/* node for self or feed tree */
+-	struct rb_node pq_node;	/* node for event queue */
+-	s64	pq_key;
+-
+-	int prio_activity;	/* for which prios are we active */
+-	enum htb_cmode cmode;	/* current mode of the class */
++	s64			pq_key;
+ 
+-	/* class attached filters */
+-	struct tcf_proto *filter_list;
+-	int filter_cnt;
++	int			prio_activity;	/* for which prios are we active */
++	enum htb_cmode		cmode;		/* current mode of the class */
++	struct rb_node		pq_node;	/* node for event queue */
++	struct rb_node		node[TC_HTB_NUMPRIO];	/* node for self or feed tree */
++};
+ 
+-	/* token bucket parameters */
+-	struct psched_ratecfg rate;
+-	struct psched_ratecfg ceil;
+-	s64	buffer, cbuffer;	/* token bucket depth/rate */
+-	s64	mbuffer;		/* max wait time */
+-	s64	tokens, ctokens;	/* current number of tokens */
+-	s64	t_c;			/* checkpoint time */
++struct htb_level {
++	struct rb_root	wait_pq;
++	struct htb_prio hprio[TC_HTB_NUMPRIO];
+ };
+ 
+ struct htb_sched {
+ 	struct Qdisc_class_hash clhash;
+-	struct list_head drops[TC_HTB_NUMPRIO];/* active leaves (for drops) */
++	int			defcls;		/* class where unclassified flows go to */
++	int			rate2quantum;	/* quant = rate / rate2quantum */
+ 
+-	/* self list - roots of self generating tree */
+-	struct rb_root row[TC_HTB_MAXDEPTH][TC_HTB_NUMPRIO];
+-	int row_mask[TC_HTB_MAXDEPTH];
+-	struct rb_node *ptr[TC_HTB_MAXDEPTH][TC_HTB_NUMPRIO];
+-	u32 last_ptr_id[TC_HTB_MAXDEPTH][TC_HTB_NUMPRIO];
++	/* filters for qdisc itself */
++	struct tcf_proto	*filter_list;
+ 
+-	/* self wait list - roots of wait PQs per row */
+-	struct rb_root wait_pq[TC_HTB_MAXDEPTH];
++#define HTB_WARN_TOOMANYEVENTS	0x1
++	unsigned int		warned;	/* only one warning */
++	int			direct_qlen;
++	struct work_struct	work;
+ 
+-	/* time of nearest event per level (row) */
+-	s64	near_ev_cache[TC_HTB_MAXDEPTH];
++	/* non shaped skbs; let them go directly thru */
++	struct sk_buff_head	direct_queue;
++	long			direct_pkts;
+ 
+-	int defcls;		/* class where unclassified flows go to */
++	struct qdisc_watchdog	watchdog;
+ 
+-	/* filters for qdisc itself */
+-	struct tcf_proto *filter_list;
++	s64			now;	/* cached dequeue time */
++	struct list_head	drops[TC_HTB_NUMPRIO];/* active leaves (for drops) */
+ 
+-	int	rate2quantum;	/* quant = rate / rate2quantum */
+-	s64	now;	/* cached dequeue time */
+-	struct qdisc_watchdog watchdog;
+-
+-	/* non shaped skbs; let them go directly thru */
+-	struct sk_buff_head direct_queue;
+-	int direct_qlen;	/* max qlen of above */
++	/* time of nearest event per level (row) */
++	s64			near_ev_cache[TC_HTB_MAXDEPTH];
+ 
+-	long direct_pkts;
++	int			row_mask[TC_HTB_MAXDEPTH];
+ 
+-#define HTB_WARN_TOOMANYEVENTS	0x1
+-	unsigned int warned;	/* only one warning */
+-	struct work_struct work;
++	struct htb_level	hlevel[TC_HTB_MAXDEPTH];
+ };
+ 
+ /* find class in global hash table using given handle */
+@@ -1319,6 +1336,7 @@ static int htb_change_class(struct Qdisc *sch, u32 classid,
+ 	struct htb_sched *q = qdisc_priv(sch);
+ 	struct htb_class *cl = (struct htb_class *)*arg, *parent;
+ 	struct nlattr *opt = tca[TCA_OPTIONS];
++	struct qdisc_rate_table *rtab = NULL, *ctab = NULL;
+ 	struct nlattr *tb[TCA_HTB_MAX + 1];
+ 	struct tc_htb_opt *hopt;
+ 

@@ -104,6 +104,15 @@ static inline int siar_valid(struct pt_regs *regs)
 	return 1;
 }
 
+static bool is_ebb_event(struct perf_event *event) { return false; }
+static int ebb_event_check(struct perf_event *event) { return 0; }
+static void ebb_event_add(struct perf_event *event) { }
+static void ebb_switch_out(unsigned long mmcr0) { }
+static unsigned long ebb_switch_in(bool ebb, unsigned long mmcr0)
+{
+	return mmcr0;
+}
+
 static inline void power_pmu_bhrb_enable(struct perf_event *event) {}
 static inline void power_pmu_bhrb_disable(struct perf_event *event) {}
 void power_pmu_flush_branch_stack(void) {}
@@ -464,6 +473,89 @@ void power_pmu_bhrb_read(struct cpu_hw_events *cpuhw)
 	return;
 }
 
+static bool is_ebb_event(struct perf_event *event)
+{
+	/*
+	 * This could be a per-PMU callback, but we'd rather avoid the cost. We
+	 * check that the PMU supports EBB, meaning those that don't can still
+	 * use bit 63 of the event code for something else if they wish.
+	 */
+	return (ppmu->flags & PPMU_EBB) &&
+	       ((event->attr.config >> PERF_EVENT_CONFIG_EBB_SHIFT) & 1);
+}
+
+static int ebb_event_check(struct perf_event *event)
+{
+	struct perf_event *leader = event->group_leader;
+
+	/* Event and group leader must agree on EBB */
+	if (is_ebb_event(leader) != is_ebb_event(event))
+		return -EINVAL;
+
+	if (is_ebb_event(event)) {
+		if (!(event->attach_state & PERF_ATTACH_TASK))
+			return -EINVAL;
+
+		if (!leader->attr.pinned || !leader->attr.exclusive)
+			return -EINVAL;
+
+		if (event->attr.inherit || event->attr.sample_period ||
+		    event->attr.enable_on_exec || event->attr.freq)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
+static void ebb_event_add(struct perf_event *event)
+{
+	if (!is_ebb_event(event) || current->thread.used_ebb)
+		return;
+
+	/*
+	 * IFF this is the first time we've added an EBB event, set
+	 * PMXE in the user MMCR0 so we can detect when it's cleared by
+	 * userspace. We need this so that we can context switch while
+	 * userspace is in the EBB handler (where PMXE is 0).
+	 */
+	current->thread.used_ebb = 1;
+	current->thread.mmcr0 |= MMCR0_PMXE;
+}
+
+static void ebb_switch_out(unsigned long mmcr0)
+{
+	if (!(mmcr0 & MMCR0_EBE))
+		return;
+
+	current->thread.siar  = mfspr(SPRN_SIAR);
+	current->thread.sier  = mfspr(SPRN_SIER);
+	current->thread.sdar  = mfspr(SPRN_SDAR);
+	current->thread.mmcr0 = mmcr0 & MMCR0_USER_MASK;
+	current->thread.mmcr2 = mfspr(SPRN_MMCR2) & MMCR2_USER_MASK;
+}
+
+static unsigned long ebb_switch_in(bool ebb, unsigned long mmcr0)
+{
+	if (!ebb)
+		goto out;
+
+	/* Enable EBB and read/write to all 6 PMCs for userspace */
+	mmcr0 |= MMCR0_EBE | MMCR0_PMCC_U6;
+
+	/* Add any bits from the user reg, FC or PMAO */
+	mmcr0 |= current->thread.mmcr0;
+
+	/* Be careful not to set PMXE if userspace had it cleared */
+	if (!(current->thread.mmcr0 & MMCR0_PMXE))
+		mmcr0 &= ~MMCR0_PMXE;
+
+	mtspr(SPRN_SIAR, current->thread.siar);
+	mtspr(SPRN_SIER, current->thread.sier);
+	mtspr(SPRN_SDAR, current->thread.sdar);
+	mtspr(SPRN_MMCR2, current->thread.mmcr2);
+out:
+	return mmcr0;
+}
 #endif /* CONFIG_PPC64 */
 
 static void perf_event_interrupt(struct pt_regs *regs);
@@ -734,6 +826,13 @@ static void power_pmu_read(struct perf_event *event)
 
 	if (!event->hw.idx)
 		return;
+
+	if (is_ebb_event(event)) {
+		val = read_pmc(event->hw.idx);
+		local64_set(&event->hw.prev_count, val);
+		return;
+	}
+
 	/*
 	 * Performance monitor interrupts come even when interrupts
 	 * are soft-disabled, as long as interrupts are hard-enabled.
@@ -901,6 +1000,21 @@ static void power_pmu_disable(struct pmu *pmu)
 		mb();
 
 		/*
+		 * Set the 'freeze counters' bit, clear EBE/PMCC/PMAO/FC56.
+		 */
+		val  = mmcr0 = mfspr(SPRN_MMCR0);
+		val |= MMCR0_FC;
+		val &= ~(MMCR0_EBE | MMCR0_PMCC | MMCR0_PMAO | MMCR0_FC56);
+
+		/*
+		 * The barrier is to make sure the mtspr has been
+		 * executed and the PMU has frozen the events etc.
+		 * before we return.
+		 */
+		write_mmcr0(cpuhw, val);
+		mb();
+
+		/*
 		 * Disable instruction sampling if it was enabled
 		 */
 		if (cpuhw->mmcr[2] & MMCRA_SAMPLE_ENABLE) {
@@ -1023,25 +1137,34 @@ static void power_pmu_enable(struct pmu *pmu)
 			++n_lim;
 			continue;
 		}
-		val = 0;
-		if (event->hw.sample_period) {
-			left = local64_read(&event->hw.period_left);
-			if (left < 0x80000000L)
-				val = 0x80000000L - left;
+
+		if (ebb)
+			val = local64_read(&event->hw.prev_count);
+		else {
+			val = 0;
+			if (event->hw.sample_period) {
+				left = local64_read(&event->hw.period_left);
+				if (left < 0x80000000L)
+					val = 0x80000000L - left;
+			}
+			local64_set(&event->hw.prev_count, val);
 		}
-		local64_set(&event->hw.prev_count, val);
+
 		event->hw.idx = idx;
 		if (event->hw.state & PERF_HES_STOPPED)
 			val = 0;
 		write_pmc(idx, val);
+
 		perf_event_update_userpage(event);
 	}
 	cpuhw->n_limited = n_lim;
 	cpuhw->mmcr[0] |= MMCR0_PMXE | MMCR0_FCECE;
 
  out_enable:
+	mmcr0 = ebb_switch_in(ebb, cpuhw->mmcr[0]);
+
 	mb();
-	write_mmcr0(cpuhw, cpuhw->mmcr[0]);
+	write_mmcr0(cpuhw, mmcr0);
 
 	/*
 	 * Enable instruction sampling if necessary
@@ -1139,13 +1262,18 @@ static int power_pmu_add(struct perf_event *event, int ef_flags)
 	event->hw.config = cpuhw->events[n0];
 
 nocheck:
+	ebb_event_add(event);
+
 	++cpuhw->n_events;
 	++cpuhw->n_added;
 
 	ret = 0;
  out:
-	if (has_branch_stack(event))
+	if (has_branch_stack(event)) {
 		power_pmu_bhrb_enable(event);
+		cpuhw->bhrb_filter = ppmu->bhrb_filter_map(
+					event->attr.branch_sample_type);
+	}
 
 	perf_pmu_enable(event->pmu);
 	local_irq_restore(flags);
@@ -1502,6 +1630,11 @@ static int power_pmu_event_init(struct perf_event *event)
 		}
 	}
 
+	/* Extra checks for EBB */
+	err = ebb_event_check(event);
+	if (err)
+		return err;
+
 	/*
 	 * If this is in a group, check if it can go on with all the
 	 * other hardware events in the group.  We assume the event
@@ -1539,6 +1672,13 @@ static int power_pmu_event_init(struct perf_event *event)
 	event->hw.event_base = cflags[n];
 	event->hw.last_period = event->hw.sample_period;
 	local64_set(&event->hw.period_left, event->hw.last_period);
+
+	/*
+	 * For EBB events we just context switch the PMC value, we don't do any
+	 * of the sample_period logic. We use hw.prev_count for this.
+	 */
+	if (is_ebb_event(event))
+		local64_set(&event->hw.prev_count, 0);
 
 	/*
 	 * See if we need to reserve the PMU.
@@ -1816,7 +1956,7 @@ static void power_pmu_setup(int cpu)
 	cpuhw->mmcr[0] = MMCR0_FC;
 }
 
-static int __cpuinit
+static int
 power_pmu_notifier(struct notifier_block *self, unsigned long action, void *hcpu)
 {
 	unsigned int cpu = (long)hcpu;
@@ -1833,7 +1973,7 @@ power_pmu_notifier(struct notifier_block *self, unsigned long action, void *hcpu
 	return NOTIFY_OK;
 }
 
-int __cpuinit register_power_pmu(struct power_pmu *pmu)
+int register_power_pmu(struct power_pmu *pmu)
 {
 	if (ppmu)
 		return -EBUSY;		/* something's already registered */

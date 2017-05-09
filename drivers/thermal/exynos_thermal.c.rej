@@ -1,0 +1,10 @@
+--- drivers/thermal/exynos_thermal.c
++++ drivers/thermal/exynos_thermal.c
+@@ -997,7 +998,6 @@ static int exynos_tmu_probe(struct platform_device *pdev)
+ 
+ 	return 0;
+ err_clk:
+-	platform_set_drvdata(pdev, NULL);
+ 	clk_unprepare(data->clk);
+ 	return ret;
+ }

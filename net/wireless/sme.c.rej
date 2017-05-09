@@ -1,0 +1,58 @@
+--- net/wireless/sme.c
++++ net/wireless/sme.c
+@@ -852,25 +997,14 @@ void __cfg80211_disconnected(struct net_device *dev, const u8 *ie,
+ 		    wdev->iftype != NL80211_IFTYPE_P2P_CLIENT))
+ 		return;
+ 
+-	if (wdev->sme_state != CFG80211_SME_CONNECTED)
+-		return;
+-
+ 	if (wdev->current_bss) {
+ 		cfg80211_unhold_bss(wdev->current_bss);
+ 		cfg80211_put_bss(wdev->wiphy, &wdev->current_bss->pub);
+ 	}
+ 
+ 	wdev->current_bss = NULL;
+-	wdev->sme_state = CFG80211_SME_IDLE;
+ 	wdev->ssid_len = 0;
+ 
+-	if (wdev->conn) {
+-		kfree(wdev->conn->ie);
+-		wdev->conn->ie = NULL;
+-		kfree(wdev->conn);
+-		wdev->conn = NULL;
+-	}
+-
+ 	nl80211_send_disconnected(rdev, dev, reason, ie, ie_len, from_ap);
+ 
+ 	/*
+@@ -916,21 +1048,20 @@ void cfg80211_disconnected(struct net_device *dev, u16 reason,
+ }
+ EXPORT_SYMBOL(cfg80211_disconnected);
+ 
+-int __cfg80211_connect(struct cfg80211_registered_device *rdev,
+-		       struct net_device *dev,
+-		       struct cfg80211_connect_params *connect,
+-		       struct cfg80211_cached_keys *connkeys,
+-		       const u8 *prev_bssid)
++/*
++ * API calls for nl80211/wext compatibility code
++ */
++int cfg80211_connect(struct cfg80211_registered_device *rdev,
++		     struct net_device *dev,
++		     struct cfg80211_connect_params *connect,
++		     struct cfg80211_cached_keys *connkeys,
++		     const u8 *prev_bssid)
+ {
+ 	struct wireless_dev *wdev = dev->ieee80211_ptr;
+-	struct cfg80211_bss *bss = NULL;
+ 	int err;
+ 
+ 	ASSERT_WDEV_LOCK(wdev);
+ 
+-	if (wdev->sme_state != CFG80211_SME_IDLE)
+-		return -EALREADY;
+-
+ 	if (WARN_ON(wdev->connect_keys)) {
+ 		kfree(wdev->connect_keys);
+ 		wdev->connect_keys = NULL;

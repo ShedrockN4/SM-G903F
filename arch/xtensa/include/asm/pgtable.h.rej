@@ -1,0 +1,103 @@
+--- arch/xtensa/include/asm/pgtable.h
++++ arch/xtensa/include/asm/pgtable.h
+@@ -64,41 +64,82 @@
+  * Virtual memory area. We keep a distance to other memory regions to be
+  * on the safe side. We also use this area for cache aliasing.
+  */
+-
+ #define VMALLOC_START		0xC0000000
+ #define VMALLOC_END		0xC7FEFFFF
+ #define TLBTEMP_BASE_1		0xC7FF0000
+ #define TLBTEMP_BASE_2		0xC7FF8000
+ 
+ /*
+- * Xtensa Linux config PTE layout (when present):
+- *	31-12:	PPN
+- *	11-6:	Software
+- *	5-4:	RING
+- *	3-0:	CA
++ * For the Xtensa architecture, the PTE layout is as follows:
++ *
++ *		31------12  11  10-9   8-6  5-4  3-2  1-0
++ *		+-----------------------------------------+
++ *		|           |   Software   |   HARDWARE   |
++ *		|    PPN    |          ADW | RI |Attribute|
++ *		+-----------------------------------------+
++ *   pte_none	|             MBZ          | 01 | 11 | 00 |
++ *		+-----------------------------------------+
++ *   present	|    PPN    | 0 | 00 | ADW | RI | CA | wx |
++ *		+- - - - - - - - - - - - - - - - - - - - -+
++ *   (PAGE_NONE)|    PPN    | 0 | 00 | ADW | 01 | 11 | 11 |
++ *		+-----------------------------------------+
++ *   swap	|     index     |   type   | 01 | 11 | 00 |
++ *		+- - - - - - - - - - - - - - - - - - - - -+
++ *   file	|        file offset       | 01 | 11 | 10 |
++ *		+-----------------------------------------+
++ *
++ * For T1050 hardware and earlier the layout differs for present and (PAGE_NONE)
++ *		+-----------------------------------------+
++ *   present	|    PPN    | 0 | 00 | ADW | RI | CA | w1 |
++ *		+-----------------------------------------+
++ *   (PAGE_NONE)|    PPN    | 0 | 00 | ADW | 01 | 01 | 00 |
++ *		+-----------------------------------------+
+  *
+- * Similar to the Alpha and MIPS ports, we need to keep track of the ref
+- * and mod bits in software.  We have a software "you can read
+- * from this page" bit, and a hardware one which actually lets the
+- * process read from the page.  On the same token we have a software
+- * writable bit and the real hardware one which actually lets the
+- * process write to the page.
++ *  Legend:
++ *   PPN        Physical Page Number
++ *   ADW	software: accessed (young) / dirty / writable
++ *   RI         ring (0=privileged, 1=user, 2 and 3 are unused)
++ *   CA		cache attribute: 00 bypass, 01 writeback, 10 writethrough
++ *		(11 is invalid and used to mark pages that are not present)
++ *   w		page is writable (hw)
++ *   x		page is executable (hw)
++ *   index      swap offset / PAGE_SIZE (bit 11-31: 21 bits -> 8 GB)
++ *		(note that the index is always non-zero)
++ *   type       swap type (5 bits -> 32 types)
++ *   file offset 26-bit offset into the file, in increments of PAGE_SIZE
+  *
+- * See further below for PTE layout for swapped-out pages.
++ *  Notes:
++ *   - (PROT_NONE) is a special case of 'present' but causes an exception for
++ *     any access (read, write, and execute).
++ *   - 'multihit-exception' has the highest priority of all MMU exceptions,
++ *     so the ring must be set to 'RING_USER' even for 'non-present' pages.
++ *   - on older hardware, the exectuable flag was not supported and
++ *     used as a 'valid' flag, so it needs to be always set.
++ *   - we need to keep track of certain flags in software (dirty and young)
++ *     to do this, we use write exceptions and have a separate software w-flag.
++ *   - attribute value 1101 (and 1111 on T1050 and earlier) is reserved
+  */
+ 
++#define _PAGE_ATTRIB_MASK	0xf
++
+ #define _PAGE_HW_EXEC		(1<<0)	/* hardware: page is executable */
+ #define _PAGE_HW_WRITE		(1<<1)	/* hardware: page is writable */
+ 
+-#define _PAGE_FILE		(1<<1)	/* non-linear mapping, if !present */
+-#define _PAGE_PROTNONE		(3<<0)	/* special case for VM_PROT_NONE */
+-
+-/* None of these cache modes include MP coherency:  */
+ #define _PAGE_CA_BYPASS		(0<<2)	/* bypass, non-speculative */
+ #define _PAGE_CA_WB		(1<<2)	/* write-back */
+ #define _PAGE_CA_WT		(2<<2)	/* write-through */
+ #define _PAGE_CA_MASK		(3<<2)
+-#define _PAGE_INVALID		(3<<2)
++#define _PAGE_CA_INVALID	(3<<2)
++
++/* We use invalid attribute values to distinguish special pte entries */
++#if XCHAL_HW_VERSION_MAJOR < 2000
++#define _PAGE_HW_VALID		0x01	/* older HW needed this bit set */
++#define _PAGE_NONE		0x04
++#else
++#define _PAGE_HW_VALID		0x00
++#define _PAGE_NONE		0x0f
++#endif
++#define _PAGE_FILE		(1<<1)	/* file mapped page, only if !present */
+ 
+ #define _PAGE_USER		(1<<4)	/* user access (ring=1) */
+ 

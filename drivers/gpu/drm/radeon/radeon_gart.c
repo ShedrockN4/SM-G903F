@@ -207,7 +207,6 @@ void radeon_gart_table_vram_free(struct radeon_device *rdev)
 	if (rdev->gart.robj == NULL) {
 		return;
 	}
-	radeon_gart_table_vram_unpin(rdev);
 	radeon_bo_unref(&rdev->gart.robj);
 }
 
@@ -621,10 +620,10 @@ int radeon_vm_alloc_pt(struct radeon_device *rdev, struct radeon_vm *vm)
 	}
 
 retry:
-	pd_size = RADEON_GPU_PAGE_ALIGN(radeon_vm_directory_size(rdev));
+	pd_size = radeon_vm_directory_size(rdev);
 	r = radeon_sa_bo_new(rdev, &rdev->vm_manager.sa_manager,
 			     &vm->page_directory, pd_size,
-			     RADEON_GPU_PAGE_SIZE, false);
+			     RADEON_VM_PTB_ALIGN_SIZE, false);
 	if (r == -ENOMEM) {
 		r = radeon_vm_evict(rdev, vm);
 		if (r)

@@ -1,0 +1,12 @@
+--- arch/arm/mach-imx/time.c
++++ arch/arm/mach-imx/time.c
+@@ -26,8 +26,8 @@
+ #include <linux/clockchips.h>
+ #include <linux/clk.h>
+ #include <linux/err.h>
++#include <linux/sched_clock.h>
+ 
+-#include <asm/sched_clock.h>
+ #include <asm/mach/time.h>
+ 
+ #include "common.h"

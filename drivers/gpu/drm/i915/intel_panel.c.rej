@@ -1,0 +1,23 @@
+--- drivers/gpu/drm/i915/intel_panel.c
++++ drivers/gpu/drm/i915/intel_panel.c
+@@ -587,14 +827,18 @@ void intel_panel_enable_backlight(struct drm_device *dev,
+ 		else
+ 			tmp &= ~BLM_PIPE_SELECT;
+ 
+-		tmp |= BLM_PIPE(pipe);
++		if (cpu_transcoder == TRANSCODER_EDP)
++			tmp |= BLM_TRANSCODER_EDP;
++		else
++			tmp |= BLM_PIPE(cpu_transcoder);
+ 		tmp &= ~BLM_PWM_ENABLE;
+ 
+ 		I915_WRITE(reg, tmp);
+ 		POSTING_READ(reg);
+ 		I915_WRITE(reg, tmp | BLM_PWM_ENABLE);
+ 
+-		if (HAS_PCH_SPLIT(dev)) {
++		if (HAS_PCH_SPLIT(dev) &&
++		    !(dev_priv->quirks & QUIRK_NO_PCH_PWM_ENABLE)) {
+ 			tmp = I915_READ(BLC_PWM_PCH_CTL1);
+ 			tmp |= BLM_PCH_PWM_ENABLE;
+ 			tmp &= ~BLM_PCH_OVERRIDE_ENABLE;

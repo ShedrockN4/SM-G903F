@@ -1,0 +1,27 @@
+--- drivers/usb/phy/phy-samsung-usb3.c
++++ drivers/usb/phy/phy-samsung-usb3.c
+@@ -217,10 +216,11 @@ static void samsung_usb3phy_shutdown(struct usb_phy *phy)
+ 	samsung_usbphy_set_type(&sphy->phy, USB_PHY_TYPE_DEVICE);
+ 
+ 	/* De-initialize usb phy registers */
+-	samsung_exynos5_usb3phy_disable(sphy);
++	sphy->drv_data->phy_disable(sphy);
+ 
+ 	/* Enable phy isolation */
+-	samsung_usbphy_set_isolation(sphy, true);
++	if (sphy->drv_data->set_isolation)
++		sphy->drv_data->set_isolation(sphy, true);
+ 
+ 	spin_unlock_irqrestore(&sphy->lock, flags);
+ 
+@@ -302,6 +305,10 @@ static int samsung_usb3phy_remove(struct platform_device *pdev)
+ static struct samsung_usbphy_drvdata usb3phy_exynos5 = {
+ 	.cpu_type		= TYPE_EXYNOS5250,
+ 	.devphy_en_mask		= EXYNOS_USBPHY_ENABLE,
++	.rate_to_clksel		= samsung_usbphy_rate_to_clksel_4x12,
++	.set_isolation		= samsung_usbphy_set_isolation_4210,
++	.phy_enable		= samsung_exynos5_usb3phy_enable,
++	.phy_disable		= samsung_exynos5_usb3phy_disable,
+ };
+ 
+ #ifdef CONFIG_OF

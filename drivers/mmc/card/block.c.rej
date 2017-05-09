@@ -1,0 +1,100 @@
+--- drivers/mmc/card/block.c
++++ drivers/mmc/card/block.c
+@@ -59,6 +60,8 @@ MODULE_ALIAS("mmc:block");
+ #define INAND_CMD38_ARG_SECTRIM1 0x81
+ #define INAND_CMD38_ARG_SECTRIM2 0x88
+ #define MMC_BLK_TIMEOUT_MS  (10 * 60 * 1000)        /* 10 minute timeout */
++#define MMC_SANITIZE_REQ_TIMEOUT 240000
++#define MMC_EXTRACT_INDEX_FROM_ARG(x) ((x & 0x00FF0000) >> 16)
+ 
+ #define mmc_req_rel_wr(req)	(((req->cmd_flags & REQ_FUA) || \
+ 				  (req->cmd_flags & REQ_META)) && \
+@@ -1031,9 +1062,6 @@ retry:
+ 			goto out;
+ 	}
+ 
+-	if (mmc_can_sanitize(card))
+-		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+-				 EXT_CSD_SANITIZE_START, 1, 0);
+ out_retry:
+ 	if (err && !mmc_blk_reset(md, card->host, type))
+ 		goto retry;
+@@ -1924,7 +1952,7 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
+ 
+ 	if (req && !mq->mqrq_prev->req)
+ 		/* claim host only for the first request */
+-		mmc_claim_host(card->host);
++		mmc_get_card(card);
+ 
+ 	ret = mmc_blk_part_switch(card, md);
+ 	if (ret) {
+@@ -1968,7 +1996,7 @@ out:
+ 		 * In case sepecial request, there is no reentry to
+ 		 * the 'mmc_blk_issue_rq' with 'mqrq_prev->req'.
+ 		 */
+-		mmc_release_host(card->host);
++		mmc_put_card(card);
+ 	return ret;
+ }
+ 
+@@ -2393,20 +2436,24 @@ static void mmc_blk_remove(struct mmc_card *card)
+ 	struct mmc_blk_data *md = mmc_get_drvdata(card);
+ 
+ 	mmc_blk_remove_parts(card, md);
++	pm_runtime_get_sync(&card->dev);
+ 	mmc_claim_host(card->host);
+ 	mmc_blk_part_switch(card, md);
+ 	mmc_release_host(card->host);
++	if (card->type != MMC_TYPE_SD_COMBO)
++		pm_runtime_disable(&card->dev);
++	pm_runtime_put_noidle(&card->dev);
+ 	mmc_blk_remove_req(md);
+ 	mmc_set_drvdata(card, NULL);
+ }
+ 
+-#ifdef CONFIG_PM
+-static int mmc_blk_suspend(struct mmc_card *card)
++static int _mmc_blk_suspend(struct mmc_card *card)
+ {
+ 	struct mmc_blk_data *part_md;
+ 	struct mmc_blk_data *md = mmc_get_drvdata(card);
+ 
+ 	if (md) {
++		pm_runtime_get_sync(&card->dev);
+ 		mmc_queue_suspend(&md->queue);
+ 		list_for_each_entry(part_md, &md->part, part) {
+ 			mmc_queue_suspend(&part_md->queue);
+@@ -2415,6 +2462,17 @@ static int mmc_blk_suspend(struct mmc_card *card)
+ 	return 0;
+ }
+ 
++static void mmc_blk_shutdown(struct mmc_card *card)
++{
++	_mmc_blk_suspend(card);
++}
++
++#ifdef CONFIG_PM
++static int mmc_blk_suspend(struct mmc_card *card)
++{
++	return _mmc_blk_suspend(card);
++}
++
+ static int mmc_blk_resume(struct mmc_card *card)
+ {
+ 	struct mmc_blk_data *part_md;
+@@ -2430,6 +2488,7 @@ static int mmc_blk_resume(struct mmc_card *card)
+ 		list_for_each_entry(part_md, &md->part, part) {
+ 			mmc_queue_resume(&part_md->queue);
+ 		}
++		pm_runtime_put(&card->dev);
+ 	}
+ 	return 0;
+ }
+@@ -2446,6 +2505,7 @@ static struct mmc_driver mmc_driver = {
+ 	.remove		= mmc_blk_remove,
+ 	.suspend	= mmc_blk_suspend,
+ 	.resume		= mmc_blk_resume,
++	.shutdown	= mmc_blk_shutdown,
+ };
+ 
+ static int __init mmc_blk_init(void)

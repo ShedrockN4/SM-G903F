@@ -1,0 +1,22 @@
+--- drivers/media/usb/hdpvr/hdpvr-core.c
++++ drivers/media/usb/hdpvr/hdpvr-core.c
+@@ -330,10 +327,6 @@ static int hdpvr_probe(struct usb_interface *interface,
+ 	if (!dev->workqueue)
+ 		goto error;
+ 
+-	/* init video transfer queues */
+-	INIT_LIST_HEAD(&dev->free_buff_list);
+-	INIT_LIST_HEAD(&dev->rec_buff_list);
+-
+ 	dev->options = hdpvr_default_options;
+ 
+ 	if (default_video_input < HDPVR_VIDEO_INPUTS)
+@@ -410,7 +403,7 @@ static int hdpvr_probe(struct usb_interface *interface,
+ 				    video_nr[atomic_inc_return(&dev_nr)]);
+ 	if (retval < 0) {
+ 		v4l2_err(&dev->v4l2_dev, "registering videodev failed\n");
+-		goto error;
++		goto reg_fail;
+ 	}
+ 
+ 	/* let the user know what node this device is now attached to */

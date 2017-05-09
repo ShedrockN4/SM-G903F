@@ -8,6 +8,49 @@
 	.text
 
 /*
+ * Implementation of MPIDR hash algorithm through shifting
+ * and OR'ing.
+ *
+ * @dst: register containing hash result
+ * @rs0: register containing affinity level 0 bit shift
+ * @rs1: register containing affinity level 1 bit shift
+ * @rs2: register containing affinity level 2 bit shift
+ * @mpidr: register containing MPIDR value
+ * @mask: register containing MPIDR mask
+ *
+ * Pseudo C-code:
+ *
+ *u32 dst;
+ *
+ *compute_mpidr_hash(u32 rs0, u32 rs1, u32 rs2, u32 mpidr, u32 mask) {
+ *	u32 aff0, aff1, aff2;
+ *	u32 mpidr_masked = mpidr & mask;
+ *	aff0 = mpidr_masked & 0xff;
+ *	aff1 = mpidr_masked & 0xff00;
+ *	aff2 = mpidr_masked & 0xff0000;
+ *	dst = (aff0 >> rs0 | aff1 >> rs1 | aff2 >> rs2);
+ *}
+ * Input registers: rs0, rs1, rs2, mpidr, mask
+ * Output register: dst
+ * Note: input and output registers must be disjoint register sets
+         (eg: a macro instance with mpidr = r1 and dst = r1 is invalid)
+ */
+	.macro compute_mpidr_hash dst, rs0, rs1, rs2, mpidr, mask
+	and	\mpidr, \mpidr, \mask			@ mask out MPIDR bits
+	and	\dst, \mpidr, #0xff			@ mask=aff0
+ ARM(	mov	\dst, \dst, lsr \rs0		)	@ dst=aff0>>rs0
+ THUMB(	lsr	\dst, \dst, \rs0		)
+	and	\mask, \mpidr, #0xff00			@ mask = aff1
+ ARM(	orr	\dst, \dst, \mask, lsr \rs1	)	@ dst|=(aff1>>rs1)
+ THUMB(	lsr	\mask, \mask, \rs1		)
+ THUMB(	orr	\dst, \dst, \mask		)
+	and	\mask, \mpidr, #0xff0000		@ mask = aff2
+ ARM(	orr	\dst, \dst, \mask, lsr \rs2	)	@ dst|=(aff2>>rs2)
+ THUMB(	lsr	\mask, \mask, \rs2		)
+ THUMB(	orr	\dst, \dst, \mask		)
+	.endm
+
+/*
  * Save CPU state for a suspend.  This saves the CPU general purpose
  * registers, and allocates space on the kernel stack to save the CPU
  * specific registers and some other data for resume.

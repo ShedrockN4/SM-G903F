@@ -426,6 +426,36 @@ static int wm_adsp_create_grouped_control(struct wm_adsp *dsp,
 					  struct wm_adsp_alg_region *region,
 					  bool create);
 
+struct wm_coeff_ctl_ops {
+	int (*xget)(struct snd_kcontrol *kcontrol,
+		    struct snd_ctl_elem_value *ucontrol);
+	int (*xput)(struct snd_kcontrol *kcontrol,
+		    struct snd_ctl_elem_value *ucontrol);
+	int (*xinfo)(struct snd_kcontrol *kcontrol,
+		     struct snd_ctl_elem_info *uinfo);
+};
+
+struct wm_coeff {
+	struct device *dev;
+	struct list_head ctl_list;
+	struct regmap *regmap;
+};
+
+struct wm_coeff_ctl {
+	const char *name;
+	struct snd_card *card;
+	struct wm_adsp_alg_region region;
+	struct wm_coeff_ctl_ops ops;
+	struct wm_adsp *adsp;
+	void *private;
+	unsigned int enabled:1;
+	struct list_head list;
+	void *cache;
+	size_t len;
+	unsigned int set:1;
+	struct snd_kcontrol *kcontrol;
+};
+
 static int wm_adsp_fw_get(struct snd_kcontrol *kcontrol,
 			  struct snd_ctl_elem_value *ucontrol)
 {
@@ -486,7 +516,7 @@ static const struct soc_enum wm_adsp2_rate_enum[] = {
 			      ARIZONA_DSP1_RATE_SHIFT, 0xf,
 			      ARIZONA_RATE_ENUM_SIZE,
 			      arizona_rate_text, arizona_rate_val),
-	SOC_VALUE_ENUM_SINGLE(ARIZONA_DSP3_CONTROL_1,
+	SOC_VALUE_ENUM_SINGLE(ARIZONA_DSP4_CONTROL_1,
 			      ARIZONA_DSP1_RATE_SHIFT, 0xf,
 			      ARIZONA_RATE_ENUM_SIZE,
 			      arizona_rate_text, arizona_rate_val),
@@ -813,6 +843,181 @@ static int wm_adsp_parse_coeff(struct wm_adsp *dsp,
 	}
 
 	return 0;
+}
+
+static int wm_coeff_info(struct snd_kcontrol *kcontrol,
+			 struct snd_ctl_elem_info *uinfo)
+{
+	struct wm_coeff_ctl *ctl = (struct wm_coeff_ctl *)kcontrol->private_value;
+
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
+	uinfo->count = ctl->len;
+	return 0;
+}
+
+static int wm_coeff_write_control(struct snd_kcontrol *kcontrol,
+				  const void *buf, size_t len)
+{
+	struct wm_coeff *wm_coeff= snd_kcontrol_chip(kcontrol);
+	struct wm_coeff_ctl *ctl = (struct wm_coeff_ctl *)kcontrol->private_value;
+	struct wm_adsp_alg_region *region = &ctl->region;
+	const struct wm_adsp_region *mem;
+	struct wm_adsp *adsp = ctl->adsp;
+	void *scratch;
+	int ret;
+	unsigned int reg;
+
+	mem = wm_adsp_find_region(adsp, region->type);
+	if (!mem) {
+		adsp_err(adsp, "No base for region %x\n",
+			 region->type);
+		return -EINVAL;
+	}
+
+	reg = ctl->region.base;
+	reg = wm_adsp_region_to_reg(mem, reg);
+
+	scratch = kmemdup(buf, ctl->len, GFP_KERNEL | GFP_DMA);
+	if (!scratch)
+		return -ENOMEM;
+
+	ret = regmap_raw_write(wm_coeff->regmap, reg, scratch,
+			       ctl->len);
+	if (ret) {
+		adsp_err(adsp, "Failed to write %zu bytes to %x\n",
+			 ctl->len, reg);
+		kfree(scratch);
+		return ret;
+	}
+
+	kfree(scratch);
+
+	return 0;
+}
+
+static int wm_coeff_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	struct wm_coeff_ctl *ctl = (struct wm_coeff_ctl *)kcontrol->private_value;
+	char *p = ucontrol->value.bytes.data;
+
+	memcpy(ctl->cache, p, ctl->len);
+
+	if (!ctl->enabled) {
+		ctl->set = 1;
+		return 0;
+	}
+
+	return wm_coeff_write_control(kcontrol, p, ctl->len);
+}
+
+static int wm_coeff_read_control(struct snd_kcontrol *kcontrol,
+				 void *buf, size_t len)
+{
+	struct wm_coeff *wm_coeff= snd_kcontrol_chip(kcontrol);
+	struct wm_coeff_ctl *ctl = (struct wm_coeff_ctl *)kcontrol->private_value;
+	struct wm_adsp_alg_region *region = &ctl->region;
+	const struct wm_adsp_region *mem;
+	struct wm_adsp *adsp = ctl->adsp;
+	void *scratch;
+	int ret;
+	unsigned int reg;
+
+	mem = wm_adsp_find_region(adsp, region->type);
+	if (!mem) {
+		adsp_err(adsp, "No base for region %x\n",
+			 region->type);
+		return -EINVAL;
+	}
+
+	reg = ctl->region.base;
+	reg = wm_adsp_region_to_reg(mem, reg);
+
+	scratch = kmalloc(ctl->len, GFP_KERNEL | GFP_DMA);
+	if (!scratch)
+		return -ENOMEM;
+
+	ret = regmap_raw_read(wm_coeff->regmap, reg, scratch, ctl->len);
+	if (ret) {
+		adsp_err(adsp, "Failed to read %zu bytes from %x\n",
+			 ctl->len, reg);
+		kfree(scratch);
+		return ret;
+	}
+
+	memcpy(buf, scratch, ctl->len);
+	kfree(scratch);
+
+	return 0;
+}
+
+static int wm_coeff_get(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	struct wm_coeff_ctl *ctl = (struct wm_coeff_ctl *)kcontrol->private_value;
+	char *p = ucontrol->value.bytes.data;
+
+	memcpy(p, ctl->cache, ctl->len);
+	return 0;
+}
+
+static int wm_coeff_add_kcontrol(struct wm_coeff *wm_coeff,
+				 struct wm_coeff_ctl *ctl,
+				 const struct snd_kcontrol_new *kctl)
+{
+	int ret;
+	struct snd_kcontrol *kcontrol;
+
+	kcontrol = snd_ctl_new1(kctl, wm_coeff);
+	ret = snd_ctl_add(ctl->card, kcontrol);
+	if (ret < 0) {
+		dev_err(wm_coeff->dev, "Failed to add %s: %d\n",
+			kctl->name, ret);
+		return ret;
+	}
+	ctl->kcontrol = kcontrol;
+	return 0;
+}
+
+struct wmfw_ctl_work {
+	struct wm_coeff *wm_coeff;
+	struct wm_coeff_ctl *ctl;
+	struct work_struct work;
+};
+
+static int wmfw_add_ctl(struct wm_coeff *wm_coeff,
+			struct wm_coeff_ctl *ctl)
+{
+	struct snd_kcontrol_new *kcontrol;
+	int ret;
+
+	if (!wm_coeff || !ctl || !ctl->name || !ctl->card)
+		return -EINVAL;
+
+	kcontrol = kzalloc(sizeof(*kcontrol), GFP_KERNEL);
+	if (!kcontrol)
+		return -ENOMEM;
+	kcontrol->iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+
+	kcontrol->name = ctl->name;
+	kcontrol->info = wm_coeff_info;
+	kcontrol->get = wm_coeff_get;
+	kcontrol->put = wm_coeff_put;
+	kcontrol->private_value = (unsigned long)ctl;
+
+	ret = wm_coeff_add_kcontrol(wm_coeff,
+				    ctl, kcontrol);
+	if (ret < 0)
+		goto err_kcontrol;
+
+	kfree(kcontrol);
+
+	list_add(&ctl->list, &wm_coeff->ctl_list);
+	return 0;
+
+err_kcontrol:
+	kfree(kcontrol);
+	return ret;
 }
 
 static int wm_adsp_load(struct wm_adsp *dsp)
@@ -1302,7 +1507,157 @@ static int wm_adsp2_fixup_region_base(struct wm_adsp *dsp,
 	return 0;
 }
 
-static int wm_adsp_setup_algs(struct wm_adsp *dsp)
+static int wm_coeff_init_control_caches(struct wm_coeff *wm_coeff)
+{
+	struct wm_coeff_ctl *ctl;
+	int ret;
+
+	list_for_each_entry(ctl, &wm_coeff->ctl_list,
+			    list) {
+		if (!ctl->enabled || ctl->set)
+			continue;
+		ret = wm_coeff_read_control(ctl->kcontrol,
+					    ctl->cache,
+					    ctl->len);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int wm_coeff_sync_controls(struct wm_coeff *wm_coeff)
+{
+	struct wm_coeff_ctl *ctl;
+	int ret;
+
+	list_for_each_entry(ctl, &wm_coeff->ctl_list,
+			    list) {
+		if (!ctl->enabled)
+			continue;
+		if (ctl->set) {
+			ret = wm_coeff_write_control(ctl->kcontrol,
+						     ctl->cache,
+						     ctl->len);
+			if (ret < 0)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+
+static void wm_adsp_ctl_work(struct work_struct *work)
+{
+	struct wmfw_ctl_work *ctl_work = container_of(work,
+						      struct wmfw_ctl_work,
+						      work);
+
+	wmfw_add_ctl(ctl_work->wm_coeff, ctl_work->ctl);
+	kfree(ctl_work);
+}
+
+static int wm_adsp_create_control(struct snd_soc_codec *codec,
+				  const struct wm_adsp_alg_region *region)
+
+{
+	struct wm_adsp *dsp = snd_soc_codec_get_drvdata(codec);
+	struct wm_coeff_ctl *ctl;
+	struct wmfw_ctl_work *ctl_work;
+	char *name;
+	char *region_name;
+	int ret;
+
+	name = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!name)
+		return -ENOMEM;
+
+	switch (region->type) {
+	case WMFW_ADSP1_PM:
+		region_name = "PM";
+		break;
+	case WMFW_ADSP1_DM:
+		region_name = "DM";
+		break;
+	case WMFW_ADSP2_XM:
+		region_name = "XM";
+		break;
+	case WMFW_ADSP2_YM:
+		region_name = "YM";
+		break;
+	case WMFW_ADSP1_ZM:
+		region_name = "ZM";
+		break;
+	default:
+		ret = -EINVAL;
+		goto err_name;
+	}
+
+	snprintf(name, PAGE_SIZE, "DSP%d %s %x",
+		 dsp->num, region_name, region->alg);
+
+	list_for_each_entry(ctl, &dsp->wm_coeff->ctl_list,
+			    list) {
+		if (!strcmp(ctl->name, name)) {
+			if (!ctl->enabled)
+				ctl->enabled = 1;
+			goto found;
+		}
+	}
+
+	ctl = kzalloc(sizeof(*ctl), GFP_KERNEL);
+	if (!ctl) {
+		ret = -ENOMEM;
+		goto err_name;
+	}
+	ctl->region = *region;
+	ctl->name = kmemdup(name, strlen(name) + 1, GFP_KERNEL);
+	if (!ctl->name) {
+		ret = -ENOMEM;
+		goto err_ctl;
+	}
+	ctl->enabled = 1;
+	ctl->set = 0;
+	ctl->ops.xget = wm_coeff_get;
+	ctl->ops.xput = wm_coeff_put;
+	ctl->card = codec->card->snd_card;
+	ctl->adsp = dsp;
+
+	ctl->len = region->len;
+	ctl->cache = kzalloc(ctl->len, GFP_KERNEL);
+	if (!ctl->cache) {
+		ret = -ENOMEM;
+		goto err_ctl_name;
+	}
+
+	ctl_work = kzalloc(sizeof(*ctl_work), GFP_KERNEL);
+	if (!ctl_work) {
+		ret = -ENOMEM;
+		goto err_ctl_cache;
+	}
+
+	ctl_work->wm_coeff = dsp->wm_coeff;
+	ctl_work->ctl = ctl;
+	INIT_WORK(&ctl_work->work, wm_adsp_ctl_work);
+	schedule_work(&ctl_work->work);
+
+found:
+	kfree(name);
+
+	return 0;
+
+err_ctl_cache:
+	kfree(ctl->cache);
+err_ctl_name:
+	kfree(ctl->name);
+err_ctl:
+	kfree(ctl);
+err_name:
+	kfree(name);
+	return ret;
+}
+
+static int wm_adsp_setup_algs(struct wm_adsp *dsp, struct snd_soc_codec *codec)
 {
 	struct regmap *regmap = dsp->regmap;
 	struct wmfw_adsp1_id_hdr adsp1_id;
@@ -1900,7 +2255,7 @@ int wm_adsp1_event(struct snd_soc_dapm_widget *w,
 		if (ret != 0)
 			goto err;
 
-		ret = wm_adsp_setup_algs(dsp);
+		ret = wm_adsp_setup_algs(dsp, codec);
 		if (ret != 0)
 			goto err;
 
@@ -1915,6 +2270,16 @@ int wm_adsp1_event(struct snd_soc_dapm_widget *w,
 
 		/* Sync set controls */
 		ret = wm_coeff_sync_controls(dsp);
+		if (ret != 0)
+			goto err;
+
+		/* Initialize caches for enabled and unset controls */
+		ret = wm_coeff_init_control_caches(dsp->wm_coeff);
+		if (ret != 0)
+			goto err;
+
+		/* Sync set controls */
+		ret = wm_coeff_sync_controls(dsp->wm_coeff);
 		if (ret != 0)
 			goto err;
 
@@ -2280,6 +2645,16 @@ int wm_adsp2_event(struct snd_soc_dapm_widget *w,
 		if (!dsp->running)
 			return -EIO;
 
+		/* Initialize caches for enabled and unset controls */
+		ret = wm_coeff_init_control_caches(dsp->wm_coeff);
+		if (ret != 0)
+			goto err;
+
+		/* Sync set controls */
+		ret = wm_coeff_sync_controls(dsp->wm_coeff);
+		if (ret != 0)
+			goto err;
+
 		ret = regmap_update_bits(dsp->regmap,
 					 dsp->base + ADSP2_CONTROL,
 					 ADSP2_CORE_ENA | ADSP2_START,
@@ -2321,6 +2696,11 @@ int wm_adsp2_event(struct snd_soc_dapm_widget *w,
 
 		list_for_each_entry(ctl, &dsp->ctl_list, list)
 			ctl->enabled = 0;
+
+		list_for_each_entry(ctl, &dsp->wm_coeff->ctl_list,
+				    list) {
+			ctl->enabled = 0;
+		}
 
 		while (!list_empty(&dsp->alg_regions)) {
 			alg_region = list_first_entry(&dsp->alg_regions,

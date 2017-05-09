@@ -1,0 +1,14 @@
+--- kernel/time/alarmtimer.c
++++ kernel/time/alarmtimer.c
+@@ -310,9 +317,10 @@ void alarm_init(struct alarm *alarm, enum alarmtimer_type type,
+ 	alarm->type = type;
+ 	alarm->state = ALARMTIMER_STATE_INACTIVE;
+ }
++EXPORT_SYMBOL_GPL(alarm_init);
+ 
+ /**
+- * alarm_start - Sets an alarm to fire
++ * alarm_start - Sets an absolute alarm to fire
+  * @alarm: ptr to alarm to set
+  * @start: time to run the alarm
+  */

@@ -1,0 +1,18 @@
+--- drivers/mmc/core/debugfs.c
++++ drivers/mmc/core/debugfs.c
+@@ -258,13 +258,13 @@ static int mmc_dbg_card_status_get(void *data, u64 *val)
+ 	u32		status;
+ 	int		ret;
+ 
+-	mmc_claim_host(card->host);
++	mmc_get_card(card);
+ 
+ 	ret = mmc_send_status(data, &status);
+ 	if (!ret)
+ 		*val = status;
+ 
+-	mmc_release_host(card->host);
++	mmc_put_card(card);
+ 
+ 	return ret;
+ }

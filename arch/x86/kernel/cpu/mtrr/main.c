@@ -51,8 +51,12 @@
 #include <asm/e820.h>
 #include <asm/mtrr.h>
 #include <asm/msr.h>
+#include <asm/pat.h>
 
 #include "mtrr.h"
+
+/* arch_phys_wc_add returns an MTRR register index plus this offset. */
+#define MTRR_TO_PHYS_WC_OFFSET 1000
 
 u32 num_var_ranges;
 
@@ -525,6 +529,73 @@ int mtrr_del(int reg, unsigned long base, unsigned long size)
 }
 EXPORT_SYMBOL(mtrr_del);
 
+/**
+ * arch_phys_wc_add - add a WC MTRR and handle errors if PAT is unavailable
+ * @base: Physical base address
+ * @size: Size of region
+ *
+ * If PAT is available, this does nothing.  If PAT is unavailable, it
+ * attempts to add a WC MTRR covering size bytes starting at base and
+ * logs an error if this fails.
+ *
+ * Drivers must store the return value to pass to mtrr_del_wc_if_needed,
+ * but drivers should not try to interpret that return value.
+ */
+int arch_phys_wc_add(unsigned long base, unsigned long size)
+{
+	int ret;
+
+	if (pat_enabled)
+		return 0;  /* Success!  (We don't need to do anything.) */
+
+	ret = mtrr_add(base, size, MTRR_TYPE_WRCOMB, true);
+	if (ret < 0) {
+		pr_warn("Failed to add WC MTRR for [%p-%p]; performance may suffer.",
+			(void *)base, (void *)(base + size - 1));
+		return ret;
+	}
+	return ret + MTRR_TO_PHYS_WC_OFFSET;
+}
+EXPORT_SYMBOL(arch_phys_wc_add);
+
+/*
+ * arch_phys_wc_del - undoes arch_phys_wc_add
+ * @handle: Return value from arch_phys_wc_add
+ *
+ * This cleans up after mtrr_add_wc_if_needed.
+ *
+ * The API guarantees that mtrr_del_wc_if_needed(error code) and
+ * mtrr_del_wc_if_needed(0) do nothing.
+ */
+void arch_phys_wc_del(int handle)
+{
+	if (handle >= 1) {
+		WARN_ON(handle < MTRR_TO_PHYS_WC_OFFSET);
+		mtrr_del(handle - MTRR_TO_PHYS_WC_OFFSET, 0, 0);
+	}
+}
+EXPORT_SYMBOL(arch_phys_wc_del);
+
+/*
+ * phys_wc_to_mtrr_index - translates arch_phys_wc_add's return value
+ * @handle: Return value from arch_phys_wc_add
+ *
+ * This will turn the return value from arch_phys_wc_add into an mtrr
+ * index suitable for debugging.
+ *
+ * Note: There is no legitimate use for this function, except possibly
+ * in printk line.  Alas there is an illegitimate use in some ancient
+ * drm ioctls.
+ */
+int phys_wc_to_mtrr_index(int handle)
+{
+	if (handle < MTRR_TO_PHYS_WC_OFFSET)
+		return -1;
+	else
+		return handle - MTRR_TO_PHYS_WC_OFFSET;
+}
+EXPORT_SYMBOL_GPL(phys_wc_to_mtrr_index);
+
 /*
  * HACK ALERT!
  * These should be called implicitly, but we can't yet until all the initcall
@@ -696,6 +767,7 @@ void mtrr_ap_init(void)
 	set_mtrr_from_inactive_cpu(~0U, 0, 0, 0);
 }
 
+#define SIZE_OR_MASK_BITS(n)  (~((1ULL << ((n) - PAGE_SHIFT)) - 1))
 /**
  * Save current fixed-range MTRR state of the first cpu in cpu_online_mask.
  */

@@ -1,0 +1,11 @@
+--- net/mac80211/cfg.c
++++ net/mac80211/cfg.c
+@@ -666,6 +680,8 @@ static void ieee80211_get_et_stats(struct wiphy *wiphy,
+ 			if (sta->sdata->dev != dev)
+ 				continue;
+ 
++			sinfo.filled = 0;
++			sta_set_sinfo(sta, &sinfo);
+ 			i = 0;
+ 			ADD_STA_STATS(sta);
+ 		}

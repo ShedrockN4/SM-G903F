@@ -1,0 +1,10 @@
+--- arch/arm/mach-exynos/cpuidle.c
++++ arch/arm/mach-exynos/cpuidle.c
+@@ -25,6 +25,7 @@
+ #include <mach/regs-pmu.h>
+ 
+ #include <plat/cpu.h>
++#include <plat/pm.h>
+ 
+ #include "common.h"
+ 

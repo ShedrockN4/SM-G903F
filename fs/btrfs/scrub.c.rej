@@ -1,0 +1,15 @@
+--- fs/btrfs/scrub.c
++++ fs/btrfs/scrub.c
+@@ -2495,10 +2489,11 @@ again:
+ 			ret = scrub_extent(sctx, extent_logical, extent_len,
+ 					   extent_physical, extent_dev, flags,
+ 					   generation, extent_mirror_num,
+-					   extent_physical);
++					   extent_logical - logical + physical);
+ 			if (ret)
+ 				goto out;
+ 
++			scrub_free_csums(sctx);
+ 			if (extent_logical + extent_len <
+ 			    key.objectid + bytes) {
+ 				logical += increment;

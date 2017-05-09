@@ -1,0 +1,19 @@
+--- arch/powerpc/Kconfig
++++ arch/powerpc/Kconfig
+@@ -138,6 +138,7 @@ config PPC
+ 	select ARCH_USE_BUILTIN_BSWAP
+ 	select OLD_SIGSUSPEND
+ 	select OLD_SIGACTION if PPC32
++	select HAVE_DEBUG_STACKOVERFLOW
+ 
+ config EARLY_PRINTK
+ 	bool
+@@ -565,7 +559,7 @@ config SCHED_SMT
+ config PPC_DENORMALISATION
+ 	bool "PowerPC denormalisation exception handling"
+ 	depends on PPC_BOOK3S_64
+-	default "n"
++	default "y" if PPC_POWERNV
+ 	---help---
+ 	  Add support for handling denormalisation of single precision
+ 	  values.  Useful for bare metal only.  If unsure say Y here.

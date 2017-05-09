@@ -1,0 +1,15 @@
+--- net/sctp/socket.c
++++ net/sctp/socket.c
+@@ -1377,9 +1368,9 @@ SCTP_STATIC int sctp_setsockopt_connectx(struct sock* sk,
+  * addrs_num structure member.  That way we can re-use the existing
+  * code.
+  */
+-SCTP_STATIC int sctp_getsockopt_connectx3(struct sock* sk, int len,
+-					char __user *optval,
+-					int __user *optlen)
++static int sctp_getsockopt_connectx3(struct sock* sk, int len,
++				     char __user *optval,
++				     int __user *optlen)
+ {
+ 	struct sctp_getaddrs_old param;
+ 	sctp_assoc_t assoc_id = 0;

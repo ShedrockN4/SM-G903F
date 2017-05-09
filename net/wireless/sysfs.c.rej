@@ -1,0 +1,15 @@
+--- net/wireless/sysfs.c
++++ net/wireless/sysfs.c
+@@ -101,10 +102,10 @@ static int wiphy_suspend(struct device *dev, pm_message_t state)
+ 
+ 	rtnl_lock();
+ 	if (rdev->wiphy.registered) {
+-		if (!rdev->wowlan)
++		if (!rdev->wiphy.wowlan_config)
+ 			cfg80211_leave_all(rdev);
+ 		if (rdev->ops->suspend)
+-			ret = rdev_suspend(rdev, rdev->wowlan);
++			ret = rdev_suspend(rdev, rdev->wiphy.wowlan_config);
+ 		if (ret == 1) {
+ 			/* Driver refuse to configure wowlan */
+ 			cfg80211_leave_all(rdev);

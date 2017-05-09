@@ -58,8 +58,6 @@ source "drivers/i2c/Kconfig"
 
 source "drivers/spi/Kconfig"
 
-source "drivers/ssbi/Kconfig"
-
 source "drivers/hsi/Kconfig"
 
 source "drivers/pps/Kconfig"
@@ -193,5 +191,7 @@ source "drivers/sensors/Kconfig"
 source "drivers/sensorhub/stm/Kconfig"
 
 source "drivers/fingerprint/Kconfig"
+
+source "drivers/fmc/Kconfig"
 
 endmenu

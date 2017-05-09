@@ -1,0 +1,61 @@
+--- arch/arm/Kconfig
++++ arch/arm/Kconfig
+@@ -9,17 +9,17 @@ config ARM
+ 	select BUILDTIME_EXTABLE_SORT if MMU
+ 	select CPU_PM if (SUSPEND || CPU_IDLE)
+ 	select DCACHE_WORD_ACCESS if (CPU_V6 || CPU_V6K || CPU_V7) && !CPU_BIG_ENDIAN && MMU
+-	select GENERIC_ATOMIC64 if (CPU_V6 || !CPU_32v6K || !AEABI)
++	select GENERIC_ATOMIC64 if (CPU_V7M || CPU_V6 || !CPU_32v6K || !AEABI)
+ 	select GENERIC_CLOCKEVENTS_BROADCAST if SMP
+ 	select GENERIC_IRQ_PROBE
+ 	select GENERIC_IRQ_SHOW
+ 	select GENERIC_PCI_IOMAP
++	select GENERIC_SCHED_CLOCK
+ 	select GENERIC_SMP_IDLE_THREAD
+ 	select GENERIC_IDLE_POLL_SETUP
+ 	select GENERIC_STRNCPY_FROM_USER
+ 	select GENERIC_STRNLEN_USER
+ 	select HARDIRQS_SW_RESEND
+-	select HAVE_AOUT
+ 	select HAVE_ARCH_JUMP_LABEL if !XIP_KERNEL
+ 	select HAVE_ARCH_KGDB
+ 	select HAVE_ARCH_SECCOMP_FILTER
+@@ -217,7 +221,8 @@ config VECTORS_BASE
+ 	default DRAM_BASE if REMAP_VECTORS_TO_RAM
+ 	default 0x00000000
+ 	help
+-	  The base address of exception vectors.
++	  The base address of exception vectors.  This must be two pages
++	  in size.
+ 
+ config ARM_PATCH_PHYS_VIRT
+ 	bool "Patch physical to virtual translations at runtime" if EMBEDDED
+@@ -804,7 +824,9 @@ config ARCH_EXYNOS
+ 	bool "Samsung EXYNOS"
+ 	select ARCH_HAS_CPUFREQ
+ 	select ARCH_HAS_HOLES_MEMORYMODEL
++	select ARCH_REQUIRE_GPIOLIB
+ 	select ARCH_SPARSEMEM_ENABLE
++	select ARM_GIC
+ 	select CLKDEV_LOOKUP
+ 	select COMMON_CLK
+ 	select CPU_V7
+@@ -813,8 +835,9 @@ config ARCH_EXYNOS
+ 	select HAVE_S3C2410_I2C if I2C
+ 	select HAVE_S3C2410_WATCHDOG if WATCHDOG
+ 	select HAVE_S3C_RTC if RTC_CLASS
+-	select NEED_MACH_GPIO_H
+ 	select NEED_MACH_MEMORY_H
++	select SPARSE_IRQ
++	select USE_OF
+ 	help
+ 	  Support for SAMSUNG's EXYNOS SoCs (EXYNOS4/5)
+ 
+@@ -1429,6 +1445,7 @@ config PCI_HOST_ITE8152
+ 	select DMABOUNCE
+ 
+ source "drivers/pci/Kconfig"
++source "drivers/pci/pcie/Kconfig"
+ 
+ source "drivers/pcmcia/Kconfig"
+ 

@@ -1,0 +1,67 @@
+--- drivers/gpu/drm/i915/intel_ringbuffer.c
++++ drivers/gpu/drm/i915/intel_ringbuffer.c
+@@ -534,9 +578,6 @@ cleanup_pipe_control(struct intel_ring_buffer *ring)
+ 	struct pipe_control *pc = ring->private;
+ 	struct drm_i915_gem_object *obj;
+ 
+-	if (!ring->private)
+-		return;
+-
+ 	obj = pc->obj;
+ 
+ 	kunmap(sg_page(obj->pages->sgl));
+@@ -544,7 +585,6 @@ cleanup_pipe_control(struct intel_ring_buffer *ring)
+ 	drm_gem_object_unreference(&obj->base);
+ 
+ 	kfree(pc);
+-	ring->private = NULL;
+ }
+ 
+ static int init_render_ring(struct intel_ring_buffer *ring)
+@@ -617,16 +659,26 @@ static void render_ring_cleanup(struct intel_ring_buffer *ring)
+ 	if (HAS_BROKEN_CS_TLB(dev))
+ 		drm_gem_object_unreference(to_gem_object(ring->private));
+ 
+-	cleanup_pipe_control(ring);
++	if (INTEL_INFO(dev)->gen >= 5)
++		cleanup_pipe_control(ring);
++
++	ring->private = NULL;
+ }
+ 
+ static void
+ update_mboxes(struct intel_ring_buffer *ring,
+ 	      u32 mmio_offset)
+ {
++/* NB: In order to be able to do semaphore MBOX updates for varying number
++ * of rings, it's easiest if we round up each individual update to a
++ * multiple of 2 (since ring updates must always be a multiple of 2)
++ * even though the actual update only requires 3 dwords.
++ */
++#define MBOX_UPDATE_DWORDS 4
+ 	intel_ring_emit(ring, MI_LOAD_REGISTER_IMM(1));
+ 	intel_ring_emit(ring, mmio_offset);
+ 	intel_ring_emit(ring, ring->outstanding_lazy_request);
++	intel_ring_emit(ring, MI_NOOP);
+ }
+ 
+ /**
+@@ -962,6 +1022,18 @@ void intel_ring_setup_status_page(struct intel_ring_buffer *ring)
+ 
+ 	I915_WRITE(mmio, (u32)ring->status_page.gfx_addr);
+ 	POSTING_READ(mmio);
++
++	/* Flush the TLB for this page */
++	if (INTEL_INFO(dev)->gen >= 6) {
++		u32 reg = RING_INSTPM(ring->mmio_base);
++		I915_WRITE(reg,
++			   _MASKED_BIT_ENABLE(INSTPM_TLB_INVALIDATE |
++					      INSTPM_SYNC_FLUSH));
++		if (wait_for((I915_READ(reg) & INSTPM_SYNC_FLUSH) == 0,
++			     1000))
++			DRM_ERROR("%s: wait for SyncFlush to complete for TLB invalidation timed out\n",
++				  ring->name);
++	}
+ }
+ 
+ static int

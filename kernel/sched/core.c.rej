@@ -1,0 +1,28 @@
+--- kernel/sched/core.c
++++ kernel/sched/core.c
+@@ -1622,15 +1635,6 @@ static void __sched_fork(struct task_struct *p)
+ 	p->se.vruntime			= 0;
+ 	INIT_LIST_HEAD(&p->se.group_node);
+ 
+-/*
+- * Load-tracking only depends on SMP, FAIR_GROUP_SCHED dependency below may be
+- * removed when useful for applications beyond shares distribution (e.g.
+- * load-balance).
+- */
+-#if defined(CONFIG_SMP) && defined(CONFIG_FAIR_GROUP_SCHED)
+-	p->se.avg.runnable_avg_period = 0;
+-	p->se.avg.runnable_avg_sum = 0;
+-#endif
+ #ifdef CONFIG_SCHEDSTATS
+ 	memset(&p->se.statistics, 0, sizeof(p->se.statistics));
+ #endif
+@@ -6360,9 +5844,6 @@ void __init sched_init_smp(void)
+ 	hotcpu_notifier(cpuset_cpu_active, CPU_PRI_CPUSET_ACTIVE);
+ 	hotcpu_notifier(cpuset_cpu_inactive, CPU_PRI_CPUSET_INACTIVE);
+ 
+-	/* RT runtime code needs to handle some hotplug events */
+-	hotcpu_notifier(update_runtime, 0);
+-
+ 	init_hrtick();
+ 
+ 	/* Move init over to a non-isolated CPU */

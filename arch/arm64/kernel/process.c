@@ -94,7 +94,7 @@ void soft_restart(unsigned long addr)
 void (*pm_power_off)(void);
 EXPORT_SYMBOL_GPL(pm_power_off);
 
-void (*arm_pm_restart)(char str, const char *cmd);
+void (*arm_pm_restart)(enum reboot_mode reboot_mode, const char *cmd);
 EXPORT_SYMBOL_GPL(arm_pm_restart);
 
 /*
@@ -192,7 +192,7 @@ void machine_restart(char *cmd)
 	exynos_ss_post_reboot();
 
 	if (arm_pm_restart)
-		arm_pm_restart('h', cmd);
+		arm_pm_restart(reboot_mode, cmd);
 
 	/*
 	 * Whoops - the architecture was unable to reboot.

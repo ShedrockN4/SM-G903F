@@ -1,0 +1,24 @@
+--- drivers/media/platform/omap3isp/isp.c
++++ drivers/media/platform/omap3isp/isp.c
+@@ -2258,6 +2267,7 @@ static int isp_probe(struct platform_device *pdev)
+ 	ret = iommu_attach_device(isp->domain, &pdev->dev);
+ 	if (ret) {
+ 		dev_err(&pdev->dev, "can't attach iommu device: %d\n", ret);
++		ret = -EPROBE_DEFER;
+ 		goto free_domain;
+ 	}
+ 
+@@ -2296,12 +2306,11 @@ detach_dev:
+ 	iommu_detach_device(isp->domain, &pdev->dev);
+ free_domain:
+ 	iommu_domain_free(isp->domain);
++	isp->domain = NULL;
+ error_isp:
+ 	isp_xclk_cleanup(isp);
+ 	omap3isp_put(isp);
+ error:
+-	platform_set_drvdata(pdev, NULL);
+-
+ 	mutex_destroy(&isp->isp_mutex);
+ 
+ 	return ret;

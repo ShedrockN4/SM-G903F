@@ -1,0 +1,113 @@
+--- fs/ext4/extents.c
++++ fs/ext4/extents.c
+@@ -2418,41 +2422,46 @@ static int ext4_remove_blocks(handle_t *handle, struct inode *inode,
+ 	    && to == le32_to_cpu(ex->ee_block) + ee_len - 1) {
+ 		/* tail removal */
+ 		ext4_lblk_t num;
++		unsigned int unaligned;
+ 
+ 		num = le32_to_cpu(ex->ee_block) + ee_len - from;
+ 		pblk = ext4_ext_pblock(ex) + ee_len - num;
+-		ext_debug("free last %u blocks starting %llu\n", num, pblk);
++		/*
++		 * Usually we want to free partial cluster at the end of the
++		 * extent, except for the situation when the cluster is still
++		 * used by any other extent (partial_cluster is negative).
++		 */
++		if (*partial_cluster < 0 &&
++		    -(*partial_cluster) == EXT4_B2C(sbi, pblk + num - 1))
++			flags |= EXT4_FREE_BLOCKS_NOFREE_LAST_CLUSTER;
++
++		ext_debug("free last %u blocks starting %llu partial %lld\n",
++			  num, pblk, *partial_cluster);
+ 		ext4_free_blocks(handle, inode, NULL, pblk, num, flags);
+ 		/*
+ 		 * If the block range to be freed didn't start at the
+ 		 * beginning of a cluster, and we removed the entire
+-		 * extent, save the partial cluster here, since we
+-		 * might need to delete if we determine that the
+-		 * truncate operation has removed all of the blocks in
+-		 * the cluster.
++		 * extent and the cluster is not used by any other extent,
++		 * save the partial cluster here, since we might need to
++		 * delete if we determine that the truncate operation has
++		 * removed all of the blocks in the cluster.
++		 *
++		 * On the other hand, if we did not manage to free the whole
++		 * extent, we have to mark the cluster as used (store negative
++		 * cluster number in partial_cluster).
+ 		 */
+-		if (pblk & (sbi->s_cluster_ratio - 1) &&
+-		    (ee_len == num))
++		unaligned = pblk & (sbi->s_cluster_ratio - 1);
++		if (unaligned && (ee_len == num) &&
++		    (*partial_cluster != -((long long)EXT4_B2C(sbi, pblk))))
+ 			*partial_cluster = EXT4_B2C(sbi, pblk);
+-		else
++		else if (unaligned)
++			*partial_cluster = -((long long)EXT4_B2C(sbi, pblk));
++		else if (*partial_cluster > 0)
+ 			*partial_cluster = 0;
+-	} else if (from == le32_to_cpu(ex->ee_block)
+-		   && to <= le32_to_cpu(ex->ee_block) + ee_len - 1) {
+-		/* head removal */
+-		ext4_lblk_t num;
+-		ext4_fsblk_t start;
+-
+-		num = to - from;
+-		start = ext4_ext_pblock(ex);
+-
+-		ext_debug("free first %u blocks starting %llu\n", num, start);
+-		ext4_free_blocks(handle, inode, NULL, start, num, flags);
+-
+-	} else {
+-		printk(KERN_INFO "strange request: removal(2) "
+-				"%u-%u from %u:%u\n",
+-				from, to, le32_to_cpu(ex->ee_block), ee_len);
+-	}
++	} else
++		ext4_error(sbi->s_sb, "strange request: removal(2) "
++			   "%u-%u from %u:%u\n",
++			   from, to, le32_to_cpu(ex->ee_block), ee_len);
+ 	return 0;
+ }
+ 
+@@ -4404,9 +4427,20 @@ void ext4_ext_truncate(handle_t *handle, struct inode *inode)
+ 
+ 	last_block = (inode->i_size + sb->s_blocksize - 1)
+ 			>> EXT4_BLOCK_SIZE_BITS(sb);
++retry:
+ 	err = ext4_es_remove_extent(inode, last_block,
+ 				    EXT_MAX_BLOCKS - last_block);
++	if (err == -ENOMEM) {
++		cond_resched();
++		congestion_wait(BLK_RW_ASYNC, HZ/50);
++		goto retry;
++	}
++	if (err) {
++		ext4_std_error(inode->i_sb, err);
++		return;
++	}
+ 	err = ext4_ext_remove_space(inode, last_block, EXT_MAX_BLOCKS - 1);
++	ext4_std_error(inode->i_sb, err);
+ }
+ 
+ static void ext4_falloc_update_inode(struct inode *inode,
+@@ -4695,7 +4747,7 @@ static int ext4_xattr_fiemap(struct inode *inode,
+ 		error = ext4_get_inode_loc(inode, &iloc);
+ 		if (error)
+ 			return error;
+-		physical = iloc.bh->b_blocknr << blockbits;
++		physical = (__u64)iloc.bh->b_blocknr << blockbits;
+ 		offset = EXT4_GOOD_OLD_INODE_SIZE +
+ 				EXT4_I(inode)->i_extra_isize;
+ 		physical += offset;
+@@ -4703,7 +4755,7 @@ static int ext4_xattr_fiemap(struct inode *inode,
+ 		flags |= FIEMAP_EXTENT_DATA_INLINE;
+ 		brelse(iloc.bh);
+ 	} else { /* external block */
+-		physical = EXT4_I(inode)->i_file_acl << blockbits;
++		physical = (__u64)EXT4_I(inode)->i_file_acl << blockbits;
+ 		length = inode->i_sb->s_blocksize;
+ 	}
+ 

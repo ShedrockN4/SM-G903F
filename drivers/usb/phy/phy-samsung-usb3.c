@@ -191,7 +191,7 @@ static u32 samsung_usb3phy_set_refclk(struct samsung_usbphy *sphy)
 	return reg;
 }
 
-static int samsung_exynos5_usb3phy_enable(struct samsung_usbphy *sphy)
+static void samsung_exynos5_usb3phy_enable(struct samsung_usbphy *sphy)
 {
 	void __iomem *regs = sphy->regs;
 	u32 phyparam0;
@@ -279,8 +279,6 @@ static int samsung_exynos5_usb3phy_enable(struct samsung_usbphy *sphy)
 
 	phyclkrst &= ~(PHYCLKRST_PORTRESET);
 	writel(phyclkrst, regs + EXYNOS5_DRD_PHYCLKRST);
-
-	return 0;
 }
 
 static void samsung_exynos5_usb3phy_disable(struct samsung_usbphy *sphy)
@@ -493,10 +491,11 @@ static int samsung_usb3phy_init(struct usb_phy *phy)
 	samsung_usbphy_set_type(&sphy->phy, USB_PHY_TYPE_DEVICE);
 
 	/* Disable phy isolation */
-	samsung_usbphy_set_isolation(sphy, false);
+	if (sphy->drv_data->set_isolation)
+		sphy->drv_data->set_isolation(sphy, false);
 
 	/* Initialize usb phy registers */
-	samsung_exynos5_usb3phy_enable(sphy);
+	sphy->drv_data->phy_enable(sphy);
 
 exit:
 	spin_unlock_irqrestore(&sphy->lock, flags);
@@ -699,7 +698,10 @@ static int samsung_usb3phy_probe(struct platform_device *pdev)
 	sphy->phy.tune		= samsung_usb3phy_tune;
 	sphy->phy.io_ops	= &samsung_usb3phy_io_ops;
 	sphy->drv_data		= samsung_usbphy_get_driver_data(pdev);
-	sphy->ref_clk_freq	= samsung_usbphy_get_refclk_freq(sphy);
+
+	sphy->ref_clk_freq = samsung_usbphy_get_refclk_freq(sphy);
+	if (sphy->ref_clk_freq < 0)
+		return -EINVAL;
 
 	spin_lock_init(&sphy->lock);
 

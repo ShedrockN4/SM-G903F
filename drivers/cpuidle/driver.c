@@ -195,7 +195,11 @@ struct cpuidle_driver *cpuidle_get_driver(void)
 EXPORT_SYMBOL_GPL(cpuidle_get_driver);
 
 /**
- * cpuidle_get_cpu_driver - return the driver tied with a cpu
+ * cpuidle_get_cpu_driver - return the driver registered for a CPU.
+ * @dev: a valid pointer to a struct cpuidle_device
+ *
+ * Returns a struct cpuidle_driver pointer, or NULL if no driver is registered
+ * for the CPU associated with @dev.
  */
 struct cpuidle_driver *cpuidle_get_cpu_driver(struct cpuidle_device *dev)
 {
@@ -206,6 +210,14 @@ struct cpuidle_driver *cpuidle_get_cpu_driver(struct cpuidle_device *dev)
 }
 EXPORT_SYMBOL_GPL(cpuidle_get_cpu_driver);
 
+/**
+ * cpuidle_driver_ref - get a reference to the driver.
+ *
+ * Increment the reference counter of the cpuidle driver associated with
+ * the current CPU.
+ *
+ * Returns a pointer to the driver, or NULL if the current CPU has no driver.
+ */
 struct cpuidle_driver *cpuidle_driver_ref(void)
 {
 	struct cpuidle_driver *drv;
@@ -220,6 +232,12 @@ struct cpuidle_driver *cpuidle_driver_ref(void)
 	return drv;
 }
 
+/**
+ * cpuidle_driver_unref - puts down the refcount for the driver
+ *
+ * Decrement the reference counter of the cpuidle driver associated with
+ * the current CPU.
+ */
 void cpuidle_driver_unref(void)
 {
 	struct cpuidle_driver *drv = cpuidle_get_driver();

@@ -1,0 +1,28 @@
+--- drivers/gpu/drm/i915/intel_drv.h
++++ drivers/gpu/drm/i915/intel_drv.h
+@@ -504,11 +582,24 @@ struct intel_dp {
+ struct intel_digital_port {
+ 	struct intel_encoder base;
+ 	enum port port;
+-	u32 port_reversal;
++	u32 saved_port_bits;
+ 	struct intel_dp dp;
+ 	struct intel_hdmi hdmi;
+ };
+ 
++static inline int
++vlv_dport_to_channel(struct intel_digital_port *dport)
++{
++	switch (dport->port) {
++	case PORT_B:
++		return 0;
++	case PORT_C:
++		return 1;
++	default:
++		BUG();
++	}
++}
++
+ static inline struct drm_crtc *
+ intel_get_crtc_for_pipe(struct drm_device *dev, int pipe)
+ {

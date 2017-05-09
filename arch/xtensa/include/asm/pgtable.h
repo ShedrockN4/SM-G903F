@@ -5,7 +5,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  *
- * Copyright (C) 2001 - 2007 Tensilica Inc.
+ * Copyright (C) 2001 - 2013 Tensilica Inc.
  */
 
 #ifndef _XTENSA_PGTABLE_H
@@ -113,19 +113,12 @@
 #define _PAGE_DIRTY		(1<<7)	/* software: page dirty */
 #define _PAGE_ACCESSED		(1<<8)	/* software: page accessed (read) */
 
-/* On older HW revisions, we always have to set bit 0 */
-#if XCHAL_HW_VERSION_MAJOR < 2000
-# define _PAGE_VALID		(1<<0)
-#else
-# define _PAGE_VALID		0
-#endif
-
-#define _PAGE_CHG_MASK	(PAGE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY)
-#define _PAGE_PRESENT	(_PAGE_VALID | _PAGE_CA_WB | _PAGE_ACCESSED)
-
 #ifdef CONFIG_MMU
 
-#define PAGE_NONE	   __pgprot(_PAGE_INVALID | _PAGE_USER | _PAGE_PROTNONE)
+#define _PAGE_CHG_MASK	   (PAGE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY)
+#define _PAGE_PRESENT	   (_PAGE_HW_VALID | _PAGE_CA_WB | _PAGE_ACCESSED)
+
+#define PAGE_NONE	   __pgprot(_PAGE_NONE | _PAGE_USER)
 #define PAGE_COPY	   __pgprot(_PAGE_PRESENT | _PAGE_USER)
 #define PAGE_COPY_EXEC	   __pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_HW_EXEC)
 #define PAGE_READONLY	   __pgprot(_PAGE_PRESENT | _PAGE_USER)
@@ -137,9 +130,9 @@
 #define PAGE_KERNEL_EXEC   __pgprot(_PAGE_PRESENT|_PAGE_HW_WRITE|_PAGE_HW_EXEC)
 
 #if (DCACHE_WAY_SIZE > PAGE_SIZE)
-# define _PAGE_DIRECTORY (_PAGE_VALID | _PAGE_ACCESSED)
+# define _PAGE_DIRECTORY   (_PAGE_HW_VALID | _PAGE_ACCESSED | _PAGE_CA_BYPASS)
 #else
-# define _PAGE_DIRECTORY (_PAGE_VALID | _PAGE_ACCESSED | _PAGE_CA_WB)
+# define _PAGE_DIRECTORY   (_PAGE_HW_VALID | _PAGE_ACCESSED | _PAGE_CA_WB)
 #endif
 
 #else /* no mmu */
@@ -207,12 +200,16 @@ static inline void pgtable_cache_init(void) { }
 /*
  * pte status.
  */
-#define pte_none(pte)	 (pte_val(pte) == _PAGE_INVALID)
-#define pte_present(pte)						\
-	(((pte_val(pte) & _PAGE_CA_MASK) != _PAGE_INVALID)		\
-	 || ((pte_val(pte) & _PAGE_PROTNONE) == _PAGE_PROTNONE))
+# define pte_none(pte)	 (pte_val(pte) == (_PAGE_CA_INVALID | _PAGE_USER))
+#if XCHAL_HW_VERSION_MAJOR < 2000
+# define pte_present(pte) ((pte_val(pte) & _PAGE_CA_MASK) != _PAGE_CA_INVALID)
+#else
+# define pte_present(pte)						\
+	(((pte_val(pte) & _PAGE_CA_MASK) != _PAGE_CA_INVALID)		\
+	 || ((pte_val(pte) & _PAGE_ATTRIB_MASK) == _PAGE_NONE))
+#endif
 #define pte_clear(mm,addr,ptep)						\
-	do { update_pte(ptep, __pte(_PAGE_INVALID)); } while(0)
+	do { update_pte(ptep, __pte(_PAGE_CA_INVALID | _PAGE_USER)); } while (0)
 
 #define pmd_none(pmd)	 (!pmd_val(pmd))
 #define pmd_present(pmd) (pmd_val(pmd) & PAGE_MASK)
@@ -333,35 +330,23 @@ ptep_set_wrprotect(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 
 
 /*
- * Encode and decode a swap entry.
- *
- * Format of swap pte:
- *  bit	   0	   MBZ
- *  bit	   1	   page-file (must be zero)
- *  bits   2 -  3  page hw access mode (must be 11: _PAGE_INVALID)
- *  bits   4 -  5  ring protection (must be 01: _PAGE_USER)
- *  bits   6 - 10  swap type (5 bits -> 32 types)
- *  bits  11 - 31  swap offset / PAGE_SIZE (21 bits -> 8GB)
- 
- * Format of file pte:
- *  bit	   0	   MBZ
- *  bit	   1	   page-file (must be one: _PAGE_FILE)
- *  bits   2 -  3  page hw access mode (must be 11: _PAGE_INVALID)
- *  bits   4 -  5  ring protection (must be 01: _PAGE_USER)
- *  bits   6 - 31  file offset / PAGE_SIZE
+ * Encode and decode a swap and file entry.
  */
+#define SWP_TYPE_BITS		5
+#define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > SWP_TYPE_BITS)
 
 #define __swp_type(entry)	(((entry).val >> 6) & 0x1f)
 #define __swp_offset(entry)	((entry).val >> 11)
 #define __swp_entry(type,offs)	\
-	((swp_entry_t) {((type) << 6) | ((offs) << 11) | _PAGE_INVALID})
+	((swp_entry_t){((type) << 6) | ((offs) << 11) | \
+	 _PAGE_CA_INVALID | _PAGE_USER})
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
 
-#define PTE_FILE_MAX_BITS	28
-#define pte_to_pgoff(pte)	(pte_val(pte) >> 4)
+#define PTE_FILE_MAX_BITS	26
+#define pte_to_pgoff(pte)	(pte_val(pte) >> 6)
 #define pgoff_to_pte(off)	\
-	((pte_t) { ((off) << 4) | _PAGE_INVALID | _PAGE_FILE })
+	((pte_t) { ((off) << 6) | _PAGE_CA_INVALID | _PAGE_FILE | _PAGE_USER })
 
 #endif /*  !defined (__ASSEMBLY__) */
 
@@ -397,14 +382,6 @@ ptep_set_wrprotect(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 
 extern  void update_mmu_cache(struct vm_area_struct * vma,
 			      unsigned long address, pte_t *ptep);
-
-/*
- * remap a physical page `pfn' of size `size' with page protection `prot'
- * into virtual address `from'
- */
-
-#define io_remap_pfn_range(vma,from,pfn,size,prot) \
-	remap_pfn_range(vma, from, pfn, size, prot)
 
 typedef pte_t *pte_addr_t;
 

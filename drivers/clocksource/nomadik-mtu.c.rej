@@ -1,0 +1,20 @@
+--- drivers/clocksource/nomadik-mtu.c
++++ drivers/clocksource/nomadik-mtu.c
+@@ -13,13 +13,16 @@
+ #include <linux/io.h>
+ #include <linux/clockchips.h>
+ #include <linux/clocksource.h>
++#include <linux/of_address.h>
++#include <linux/of_irq.h>
++#include <linux/of_platform.h>
+ #include <linux/clk.h>
+ #include <linux/jiffies.h>
+ #include <linux/delay.h>
+ #include <linux/err.h>
+ #include <linux/platform_data/clocksource-nomadik-mtu.h>
++#include <linux/sched_clock.h>
+ #include <asm/mach/time.h>
+-#include <asm/sched_clock.h>
+ 
+ /*
+  * The MTU device hosts four different counters, with 4 set of

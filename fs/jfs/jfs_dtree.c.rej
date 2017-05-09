@@ -1,0 +1,99 @@
+--- fs/jfs/jfs_dtree.c
++++ fs/jfs/jfs_dtree.c
+@@ -3088,13 +3096,13 @@ int jfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
+ 			index = dirtab_slot.slot;
+ 			DT_GETPAGE(ip, bn, mp, PSIZE, p, rc);
+ 			if (rc) {
+-				filp->f_pos = DIREND;
++				ctx->pos = DIREND;
+ 				return 0;
+ 			}
+ 			if (p->header.flag & BT_INTERNAL) {
+ 				jfs_err("jfs_readdir: bad index table");
+ 				DT_PUTPAGE(mp);
+-				filp->f_pos = -1;
++				ctx->pos = DIREND;
+ 				return 0;
+ 			}
+ 		} else {
+@@ -3102,23 +3110,22 @@ int jfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
+ 				/*
+ 				 * self "."
+ 				 */
+-				filp->f_pos = 0;
+-				if (filldir(dirent, ".", 1, 0, ip->i_ino,
+-					    DT_DIR))
++				ctx->pos = 1;
++				if (!dir_emit(ctx, ".", 1, ip->i_ino, DT_DIR))
+ 					return 0;
+ 			}
+ 			/*
+ 			 * parent ".."
+ 			 */
+-			filp->f_pos = 1;
+-			if (filldir(dirent, "..", 2, 1, PARENT(ip), DT_DIR))
++			ctx->pos = 2;
++			if (!dir_emit(ctx, "..", 2, PARENT(ip), DT_DIR))
+ 				return 0;
+ 
+ 			/*
+ 			 * Find first entry of left-most leaf
+ 			 */
+ 			if (dtEmpty(ip)) {
+-				filp->f_pos = DIREND;
++				ctx->pos = DIREND;
+ 				return 0;
+ 			}
+ 
+@@ -3131,28 +3138,25 @@ int jfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
+ 		/*
+ 		 * Legacy filesystem - OS/2 & Linux JFS < 0.3.6
+ 		 *
+-		 * pn = index = 0:	First entry "."
+-		 * pn = 0; index = 1:	Second entry ".."
++		 * pn = 0; index = 1:	First entry "."
++		 * pn = 0; index = 2:	Second entry ".."
+ 		 * pn > 0:		Real entries, pn=1 -> leftmost page
+ 		 * pn = index = -1:	No more entries
+ 		 */
+-		dtpos = filp->f_pos;
+-		if (dtpos == 0) {
++		dtpos = ctx->pos;
++		if (dtpos < 2) {
+ 			/* build "." entry */
+-
+-			if (filldir(dirent, ".", 1, filp->f_pos, ip->i_ino,
+-				    DT_DIR))
++			ctx->pos = 1;
++			if (!dir_emit(ctx, ".", 1, ip->i_ino, DT_DIR))
+ 				return 0;
+-			dtoffset->index = 1;
+-			filp->f_pos = dtpos;
++			dtoffset->index = 2;
++			ctx->pos = dtpos;
+ 		}
+ 
+ 		if (dtoffset->pn == 0) {
+-			if (dtoffset->index == 1) {
++			if (dtoffset->index == 2) {
+ 				/* build ".." entry */
+-
+-				if (filldir(dirent, "..", 2, filp->f_pos,
+-					    PARENT(ip), DT_DIR))
++				if (!dir_emit(ctx, "..", 2, PARENT(ip), DT_DIR))
+ 					return 0;
+ 			} else {
+ 				jfs_err("jfs_readdir called with "
+@@ -3241,6 +3245,12 @@ int jfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
+ 					}
+ 					jfs_dirent->position = unique_pos++;
+ 				}
++				/*
++				 * We add 1 to the index because we may
++				 * use a value of 2 internally, and NFSv4
++				 * doesn't like that.
++				 */
++				jfs_dirent->position++;
+ 			} else {
+ 				jfs_dirent->position = dtpos;
+ 				len = min(d_namleft, DTLHDRDATALEN_LEGACY);

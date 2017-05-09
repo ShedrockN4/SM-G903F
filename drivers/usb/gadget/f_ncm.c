@@ -16,6 +16,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/device.h>
 #include <linux/etherdevice.h>
 #include <linux/crc32.h>
@@ -23,6 +24,8 @@
 #include <linux/usb/cdc.h>
 
 #include "u_ether.h"
+#include "u_ether_configfs.h"
+#include "u_ncm.h"
 
 /*
  * This function is a "CDC Network Control Model" (CDC NCM) Ethernet link.
@@ -1460,12 +1463,14 @@ int ncm_bind_config(struct usb_configuration *c, u8 ethaddr[ETH_ALEN],
 	ncm->port.func.get_alt = ncm_get_alt;
 	ncm->port.func.setup = ncm_setup;
 	ncm->port.func.disable = ncm_disable;
+	ncm->port.func.free_func = ncm_free;
 
 	ncm->port.wrap = ncm_wrap_ntb;
 	ncm->port.unwrap = ncm_unwrap_ntb;
 
-	status = usb_add_function(c, &ncm->port.func);
-	if (status)
-		kfree(ncm);
-	return status;
+	return &ncm->port.func;
 }
+
+DECLARE_USB_FUNCTION_INIT(ncm, ncm_alloc_inst, ncm_alloc);
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Yauheni Kaliuta");

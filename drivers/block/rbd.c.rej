@@ -1,0 +1,134 @@
+--- drivers/block/rbd.c
++++ drivers/block/rbd.c
+@@ -1116,6 +1106,7 @@ static void zero_bio_chain(struct bio *chain, int start_ofs)
+ 				buf = bvec_kmap_irq(bv, &flags);
+ 				memset(buf + remainder, 0,
+ 				       bv->bv_len - remainder);
++				flush_dcache_page(bv->bv_page);
+ 				bvec_kunmap_irq(buf, &flags);
+ 			}
+ 			pos += bv->bv_len;
+@@ -1143,11 +1134,12 @@ static void zero_pages(struct page **pages, u64 offset, u64 end)
+ 		unsigned long flags;
+ 		void *kaddr;
+ 
+-		page_offset = (size_t)(offset & ~PAGE_MASK);
+-		length = min(PAGE_SIZE - page_offset, (size_t)(end - offset));
++		page_offset = offset & ~PAGE_MASK;
++		length = min_t(size_t, PAGE_SIZE - page_offset, end - offset);
+ 		local_irq_save(flags);
+ 		kaddr = kmap_atomic(*page);
+ 		memset(kaddr + page_offset, 0, length);
++		flush_dcache_page(*page);
+ 		kunmap_atomic(kaddr);
+ 		local_irq_restore(flags);
+ 
+@@ -2161,9 +2153,9 @@ static int rbd_img_request_fill(struct rbd_img_request *img_request,
+ 	struct rbd_obj_request *obj_request = NULL;
+ 	struct rbd_obj_request *next_obj_request;
+ 	bool write_request = img_request_write_test(img_request);
+-	struct bio *bio_list;
++	struct bio *bio_list = 0;
+ 	unsigned int bio_offset = 0;
+-	struct page **pages;
++	struct page **pages = 0;
+ 	u64 img_offset;
+ 	u64 resid;
+ 	u16 opcode;
+@@ -5074,23 +5091,6 @@ err_out_module:
+ 	return (ssize_t)rc;
+ }
+ 
+-static struct rbd_device *__rbd_get_dev(unsigned long dev_id)
+-{
+-	struct list_head *tmp;
+-	struct rbd_device *rbd_dev;
+-
+-	spin_lock(&rbd_dev_list_lock);
+-	list_for_each(tmp, &rbd_dev_list) {
+-		rbd_dev = list_entry(tmp, struct rbd_device, node);
+-		if (rbd_dev->dev_id == dev_id) {
+-			spin_unlock(&rbd_dev_list_lock);
+-			return rbd_dev;
+-		}
+-	}
+-	spin_unlock(&rbd_dev_list_lock);
+-	return NULL;
+-}
+-
+ static void rbd_dev_device_release(struct device *dev)
+ {
+ 	struct rbd_device *rbd_dev = dev_to_rbd_dev(dev);
+@@ -5135,8 +5135,10 @@ static ssize_t rbd_remove(struct bus_type *bus,
+ 			  size_t count)
+ {
+ 	struct rbd_device *rbd_dev = NULL;
+-	int target_id;
++	struct list_head *tmp;
++	int dev_id;
+ 	unsigned long ul;
++	bool already = false;
+ 	int ret;
+ 
+ 	ret = strict_strtoul(buf, 10, &ul);
+@@ -5144,37 +5146,40 @@ static ssize_t rbd_remove(struct bus_type *bus,
+ 		return ret;
+ 
+ 	/* convert to int; abort if we lost anything in the conversion */
+-	target_id = (int) ul;
+-	if (target_id != ul)
++	dev_id = (int)ul;
++	if (dev_id != ul)
+ 		return -EINVAL;
+ 
+-	mutex_lock_nested(&ctl_mutex, SINGLE_DEPTH_NESTING);
+-
+-	rbd_dev = __rbd_get_dev(target_id);
+-	if (!rbd_dev) {
+-		ret = -ENOENT;
+-		goto done;
++	ret = -ENOENT;
++	spin_lock(&rbd_dev_list_lock);
++	list_for_each(tmp, &rbd_dev_list) {
++		rbd_dev = list_entry(tmp, struct rbd_device, node);
++		if (rbd_dev->dev_id == dev_id) {
++			ret = 0;
++			break;
++		}
++	}
++	if (!ret) {
++		spin_lock_irq(&rbd_dev->lock);
++		if (rbd_dev->open_count)
++			ret = -EBUSY;
++		else
++			already = test_and_set_bit(RBD_DEV_FLAG_REMOVING,
++							&rbd_dev->flags);
++		spin_unlock_irq(&rbd_dev->lock);
+ 	}
++	spin_unlock(&rbd_dev_list_lock);
++	if (ret < 0 || already)
++		return ret;
+ 
+-	spin_lock_irq(&rbd_dev->lock);
+-	if (rbd_dev->open_count)
+-		ret = -EBUSY;
+-	else
+-		set_bit(RBD_DEV_FLAG_REMOVING, &rbd_dev->flags);
+-	spin_unlock_irq(&rbd_dev->lock);
+-	if (ret < 0)
+-		goto done;
+ 	rbd_bus_del_dev(rbd_dev);
+ 	ret = rbd_dev_header_watch_sync(rbd_dev, false);
+ 	if (ret)
+ 		rbd_warn(rbd_dev, "failed to cancel watch event (%d)\n", ret);
+ 	rbd_dev_image_release(rbd_dev);
+ 	module_put(THIS_MODULE);
+-	ret = count;
+-done:
+-	mutex_unlock(&ctl_mutex);
+ 
+-	return ret;
++	return count;
+ }
+ 
+ /*

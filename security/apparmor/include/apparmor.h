@@ -15,6 +15,7 @@
 #ifndef __APPARMOR_H
 #define __APPARMOR_H
 
+#include <linux/slab.h>
 #include <linux/fs.h>
 
 #include "match.h"

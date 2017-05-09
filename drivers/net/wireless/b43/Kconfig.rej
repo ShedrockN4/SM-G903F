@@ -1,0 +1,23 @@
+--- drivers/net/wireless/b43/Kconfig
++++ drivers/net/wireless/b43/Kconfig
+@@ -28,18 +28,12 @@ config B43
+ 
+ config B43_BCMA
+ 	bool "Support for BCMA bus"
+-	depends on B43 && BCMA
+-	default y
+-
+-config B43_BCMA_EXTRA
+-	bool "Hardware support that overlaps with the brcmsmac driver"
+-	depends on B43_BCMA
+-	default n if BRCMSMAC
++	depends on B43 && (BCMA = y || BCMA = B43)
+ 	default y
+ 
+ config B43_SSB
+ 	bool
+-	depends on B43 && SSB
++	depends on B43 && (SSB = y || SSB = B43)
+ 	default y
+ 
+ # Auto-select SSB PCI-HOST support, if possible

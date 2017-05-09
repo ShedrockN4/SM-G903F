@@ -1,0 +1,261 @@
+--- drivers/spi/spi-s3c64xx.c
++++ drivers/spi/spi-s3c64xx.c
+@@ -39,6 +39,7 @@
+ #endif
+ 
+ #define MAX_SPI_PORTS		3
++#define S3C64XX_SPI_QUIRK_POLL		(1 << 0)
+ 
+ /* Registers and bit-fields */
+ 
+@@ -207,6 +210,7 @@ struct s3c64xx_spi_driver_data {
+ 	struct s3c64xx_spi_port_config	*port_conf;
+ 	unsigned int			port_id;
+ 	unsigned long			gpios[4];
++	bool				cs_gpio;
+ };
+ 
+ static void flush_fifo(struct s3c64xx_spi_driver_data *sdd)
+@@ -346,8 +350,12 @@ static int s3c64xx_spi_prepare_transfer(struct spi_master *spi)
+ {
+ 	struct s3c64xx_spi_driver_data *sdd = spi_master_get_devdata(spi);
+ 
+-	/* Acquire DMA channels */
+-	while (!acquire_dma(sdd))
++	/*
++	 * If DMA resource was not available during
++	 * probe, no need to continue with dma requests
++	 * else Acquire DMA channels
++	 */
++	while (!is_polling(sdd) && !acquire_dma(sdd))
+ 		usleep_range(10000, 11000);
+ 
+ 	pm_runtime_get_sync(&sdd->pdev->dev);
+@@ -360,9 +368,12 @@ static int s3c64xx_spi_unprepare_transfer(struct spi_master *spi)
+ 	struct s3c64xx_spi_driver_data *sdd = spi_master_get_devdata(spi);
+ 
+ 	/* Free DMA channels */
+-	sdd->ops->release((enum dma_ch)sdd->rx_dma.ch, &s3c64xx_spi_dma_client);
+-	sdd->ops->release((enum dma_ch)sdd->tx_dma.ch, &s3c64xx_spi_dma_client);
+-
++	if (!is_polling(sdd)) {
++		sdd->ops->release((enum dma_ch)sdd->rx_dma.ch,
++					&s3c64xx_spi_dma_client);
++		sdd->ops->release((enum dma_ch)sdd->tx_dma.ch,
++					&s3c64xx_spi_dma_client);
++	}
+ 	pm_runtime_put(&sdd->pdev->dev);
+ 
+ 	return 0;
+@@ -469,8 +483,10 @@ static int s3c64xx_spi_unprepare_transfer(struct spi_master *spi)
+ 	struct s3c64xx_spi_driver_data *sdd = spi_master_get_devdata(spi);
+ 
+ 	/* Free DMA channels */
+-	dma_release_channel(sdd->rx_dma.ch);
+-	dma_release_channel(sdd->tx_dma.ch);
++	if (!is_polling(sdd)) {
++		dma_release_channel(sdd->rx_dma.ch);
++		dma_release_channel(sdd->tx_dma.ch);
++	}
+ 
+ 	pm_runtime_put(&sdd->pdev->dev);
+ 	return 0;
+@@ -563,14 +579,40 @@ static inline void enable_cs(struct s3c64xx_spi_driver_data *sdd,
+ 		if (sdd->tgl_spi != spi) { /* if last mssg on diff device */
+ 			/* Deselect the last toggled device */
+ 			cs = sdd->tgl_spi->controller_data;
+-			gpio_set_value(cs->line,
+-				spi->mode & SPI_CS_HIGH ? 0 : 1);
++			if (sdd->cs_gpio)
++				gpio_set_value(cs->line,
++					spi->mode & SPI_CS_HIGH ? 0 : 1);
+ 		}
+ 		sdd->tgl_spi = NULL;
+ 	}
+ 
+ 	cs = spi->controller_data;
+-	gpio_set_value(cs->line, spi->mode & SPI_CS_HIGH ? 1 : 0);
++	if (sdd->cs_gpio)
++		gpio_set_value(cs->line, spi->mode & SPI_CS_HIGH ? 1 : 0);
++
++	/* Start the signals */
++	writel(0, sdd->regs + S3C64XX_SPI_SLAVE_SEL);
++}
++
++static u32 s3c64xx_spi_wait_for_timeout(struct s3c64xx_spi_driver_data *sdd,
++					int timeout_ms)
++{
++	void __iomem *regs = sdd->regs;
++	unsigned long val = 1;
++	u32 status;
++
++	/* max fifo depth available */
++	u32 max_fifo = (FIFO_LVL_MASK(sdd) >> 1) + 1;
++
++	if (timeout_ms)
++		val = msecs_to_loops(timeout_ms);
++
++	do {
++		status = readl(regs + S3C64XX_SPI_STATUS);
++	} while (RX_FIFO_LVL(status, sdd) < max_fifo && --val);
++
++	/* return the actual received data length */
++	return RX_FIFO_LVL(status, sdd);
+ }
+ 
+ static int wait_for_xfer(struct s3c64xx_spi_driver_data *sdd,
+@@ -679,7 +744,11 @@ static inline void disable_cs(struct s3c64xx_spi_driver_data *sdd,
+ 	if (sdd->tgl_spi == spi)
+ 		sdd->tgl_spi = NULL;
+ 
+-	gpio_set_value(cs->line, spi->mode & SPI_CS_HIGH ? 0 : 1);
++	if (sdd->cs_gpio)
++		gpio_set_value(cs->line, spi->mode & SPI_CS_HIGH ? 0 : 1);
++
++	/* Quiese the signals */
++	writel(S3C64XX_SPI_SLAVE_SIG_INACT, sdd->regs + S3C64XX_SPI_SLAVE_SEL);
+ }
+ 
+ static void s3c64xx_spi_config(struct s3c64xx_spi_driver_data *sdd)
+@@ -761,7 +830,7 @@ static int s3c64xx_spi_map_mssg(struct s3c64xx_spi_driver_data *sdd,
+ 	struct device *dev = &sdd->pdev->dev;
+ 	struct spi_transfer *xfer;
+ 
+-	if (msg->is_dma_mapped)
++	if (is_polling(sdd) || msg->is_dma_mapped)
+ 		return 0;
+ 
+ 	/* First mark all xfer unmapped */
+@@ -810,7 +879,7 @@ static void s3c64xx_spi_unmap_mssg(struct s3c64xx_spi_driver_data *sdd,
+ 	struct device *dev = &sdd->pdev->dev;
+ 	struct spi_transfer *xfer;
+ 
+-	if (msg->is_dma_mapped)
++	if (is_polling(sdd) || msg->is_dma_mapped)
+ 		return;
+ 
+ 	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
+@@ -889,8 +958,9 @@ static int s3c64xx_spi_transfer_one_message(struct spi_master *master,
+ 
+ 		/* Polling method for xfers not bigger than FIFO capacity */
+ 		use_dma = 0;
+-		if (sdd->rx_dma.ch && sdd->tx_dma.ch &&
+-		    (xfer->len > ((FIFO_LVL_MASK(sdd) >> 1) + 1)))
++		if (!is_polling(sdd) &&
++			(sdd->rx_dma.ch && sdd->tx_dma.ch &&
++			(xfer->len > ((FIFO_LVL_MASK(sdd) >> 1) + 1))))
+ 			use_dma = 1;
+ 
+ 		spin_lock_irqsave(&sdd->lock, flags);
+@@ -904,17 +974,10 @@ static int s3c64xx_spi_transfer_one_message(struct spi_master *master,
+ 		/* Slave Select */
+ 		enable_cs(sdd, spi);
+ 
+-		/* Start the signals */
+-		writel(0, sdd->regs + S3C64XX_SPI_SLAVE_SEL);
+-
+ 		spin_unlock_irqrestore(&sdd->lock, flags);
+ 
+ 		status = wait_for_xfer(sdd, xfer, use_dma);
+ 
+-		/* Quiese the signals */
+-		writel(S3C64XX_SPI_SLAVE_SIG_INACT,
+-		       sdd->regs + S3C64XX_SPI_SLAVE_SEL);
+-
+ 		if (status) {
+ 			dev_err(&spi->dev, "I/O Error: rx-%d tx-%d res:rx-%c tx-%c len-%d\n",
+ 				xfer->rx_buf ? 1 : 0, xfer->tx_buf ? 1 : 0,
+@@ -970,8 +1033,10 @@ static struct s3c64xx_spi_csinfo *s3c64xx_get_slave_ctrldata(
+ {
+ 	struct s3c64xx_spi_csinfo *cs;
+ 	struct device_node *slave_np, *data_np = NULL;
++	struct s3c64xx_spi_driver_data *sdd;
+ 	u32 fb_delay = 0;
+ 
++	sdd = spi_master_get_devdata(spi->master);
+ 	slave_np = spi->dev.of_node;
+ 	if (!slave_np) {
+ 		dev_err(&spi->dev, "device node not found\n");
+@@ -991,7 +1056,10 @@ static struct s3c64xx_spi_csinfo *s3c64xx_get_slave_ctrldata(
+ 		return ERR_PTR(-ENOMEM);
+ 	}
+ 
+-	cs->line = of_get_named_gpio(data_np, "cs-gpio", 0);
++	/* The CS line is asserted/deasserted by the gpio pin */
++	if (sdd->cs_gpio)
++		cs->line = of_get_named_gpio(data_np, "cs-gpio", 0);
++
+ 	if (!gpio_is_valid(cs->line)) {
+ 		dev_err(&spi->dev, "chip select gpio is not specified or invalid\n");
+ 		kfree(cs);
+@@ -1031,7 +1099,8 @@ static int s3c64xx_spi_setup(struct spi_device *spi)
+ 		return -ENODEV;
+ 	}
+ 
+-	if (!spi_get_ctldata(spi)) {
++	/* Request gpio only if cs line is asserted by gpio pins */
++	if (sdd->cs_gpio) {
+ 		err = gpio_request_one(cs->line, GPIOF_OUT_INIT_HIGH,
+ 				       dev_name(&spi->dev));
+ 		if (err) {
+@@ -1302,7 +1375,11 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
+ 	sdd->cntrlr_info = sci;
+ 	sdd->pdev = pdev;
+ 	sdd->sfr_start = mem_res->start;
++	sdd->cs_gpio = true;
+ 	if (pdev->dev.of_node) {
++		if (!of_find_property(pdev->dev.of_node, "cs-gpio", NULL))
++			sdd->cs_gpio = false;
++
+ 		ret = of_alias_get_id(pdev->dev.of_node, "spi");
+ 		if (ret < 0) {
+ 			dev_err(&pdev->dev, "failed to get alias id, errno %d\n",
+@@ -1319,19 +1396,19 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
+ 	if (!sdd->pdev->dev.of_node) {
+ 		res = platform_get_resource(pdev, IORESOURCE_DMA,  0);
+ 		if (!res) {
+-			dev_err(&pdev->dev, "Unable to get SPI tx dma "
+-					"resource\n");
+-			return -ENXIO;
+-		}
+-		sdd->tx_dma.dmach = res->start;
++			dev_warn(&pdev->dev, "Unable to get SPI tx dma "
++					"resource. Switching to poll mode\n");
++			sdd->port_conf->quirks = S3C64XX_SPI_QUIRK_POLL;
++		} else
++			sdd->tx_dma.dmach = res->start;
+ 
+ 		res = platform_get_resource(pdev, IORESOURCE_DMA,  1);
+ 		if (!res) {
+-			dev_err(&pdev->dev, "Unable to get SPI rx dma "
+-					"resource\n");
+-			return -ENXIO;
+-		}
+-		sdd->rx_dma.dmach = res->start;
++			dev_warn(&pdev->dev, "Unable to get SPI rx dma "
++					"resource. Switching to poll mode\n");
++			sdd->port_conf->quirks = S3C64XX_SPI_QUIRK_POLL;
++		} else
++			sdd->rx_dma.dmach = res->start;
+ 	}
+ 
+ 	sdd->tx_dma.direction = DMA_MEM_TO_DEV;
+@@ -1598,15 +1683,16 @@ static struct platform_device_id s3c64xx_spi_driver_ids[] = {
+ 	{ },
+ };
+ 
+-#ifdef CONFIG_OF
+ static const struct of_device_id s3c64xx_spi_dt_match[] = {
+ 	{ .compatible = "samsung,exynos4210-spi",
+ 			.data = (void *)&exynos4_spi_port_config,
+ 	},
++	{ .compatible = "samsung,exynos5440-spi",
++			.data = (void *)&exynos5440_spi_port_config,
++	},
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(of, s3c64xx_spi_dt_match);
+-#endif /* CONFIG_OF */
+ 
+ static struct platform_driver s3c64xx_spi_driver = {
+ 	.driver = {

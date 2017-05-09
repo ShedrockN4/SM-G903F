@@ -1,0 +1,50 @@
+--- kernel/time/timekeeping.c
++++ kernel/time/timekeeping.c
+@@ -1252,9 +1268,10 @@ out_adjust:
+  * It also calls into the NTP code to handle leapsecond processing.
+  *
+  */
+-static inline void accumulate_nsecs_to_secs(struct timekeeper *tk)
++static inline unsigned int accumulate_nsecs_to_secs(struct timekeeper *tk)
+ {
+ 	u64 nsecps = (u64)NSEC_PER_SEC << tk->shift;
++	unsigned int action = 0;
+ 
+ 	while (tk->xtime_nsec >= nsecps) {
+ 		int leap;
+@@ -1277,8 +1294,10 @@ static inline void accumulate_nsecs_to_secs(struct timekeeper *tk)
+ 			__timekeeping_set_tai_offset(tk, tk->tai_offset - leap);
+ 
+ 			clock_was_set_delayed();
++			action = TK_CLOCK_WAS_SET;
+ 		}
+ 	}
++	return action;
+ }
+ 
+ /**
+@@ -1363,6 +1382,7 @@ static void update_wall_time(void)
+ 	struct timekeeper *tk = &shadow_timekeeper;
+ 	cycle_t offset;
+ 	int shift = 0, maxshift;
++	unsigned int action;
+ 	unsigned long flags;
+ 
+ 	raw_spin_lock_irqsave(&timekeeper_lock, flags);
+@@ -1415,7 +1435,7 @@ static void update_wall_time(void)
+ 	 * Finally, make sure that after the rounding
+ 	 * xtime_nsec isn't larger than NSEC_PER_SEC
+ 	 */
+-	accumulate_nsecs_to_secs(tk);
++	action = accumulate_nsecs_to_secs(tk);
+ 
+ 	write_seqcount_begin(&timekeeper_seq);
+ 	/* Update clock->cycle_last with the new value */
+@@ -1693,6 +1713,7 @@ int do_adjtimex(struct timex *txc)
+ 
+ 	if (tai != orig_tai) {
+ 		__timekeeping_set_tai_offset(tk, tai);
++		update_pvclock_gtod(tk, true);
+ 		clock_was_set_delayed();
+ 	}
+ 	write_seqcount_end(&timekeeper_seq);

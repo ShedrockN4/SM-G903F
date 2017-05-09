@@ -1,0 +1,14 @@
+--- include/linux/hugetlb.h
++++ include/linux/hugetlb.h
+@@ -391,6 +404,11 @@ static inline unsigned int pages_per_huge_page(struct hstate *h)
+ }
+ #define hstate_index_to_shift(index) 0
+ #define hstate_index(h) 0
++
++static inline pgoff_t basepage_index(struct page *page)
++{
++	return page->index;
++}
+ #endif	/* CONFIG_HUGETLB_PAGE */
+ 
+ #endif /* _LINUX_HUGETLB_H */

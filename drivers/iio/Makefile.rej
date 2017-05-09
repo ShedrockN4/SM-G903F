@@ -1,0 +1,8 @@
+--- drivers/iio/Makefile
++++ drivers/iio/Makefile
+@@ -21,3 +21,5 @@ obj-y += frequency/
+ obj-y += imu/
+ obj-y += light/
+ obj-y += magnetometer/
++obj-y += trigger/
++obj-y += pressure/

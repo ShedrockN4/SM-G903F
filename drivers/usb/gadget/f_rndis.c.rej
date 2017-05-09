@@ -1,0 +1,46 @@
+--- drivers/usb/gadget/f_rndis.c
++++ drivers/usb/gadget/f_rndis.c
+@@ -17,15 +17,17 @@
+ 
+ #include <linux/slab.h>
+ #include <linux/kernel.h>
++#include <linux/module.h>
+ #include <linux/device.h>
+ #include <linux/etherdevice.h>
+ 
+ #include <linux/atomic.h>
+ 
+ #include "u_ether.h"
++#include "u_ether_configfs.h"
++#include "u_rndis.h"
+ #include "rndis.h"
+ 
+-
+ /*
+  * This function is an RNDIS Ethernet port -- a Microsoft protocol that's
+  * been promoted instead of the standard CDC Ethernet.  The published RNDIS
+@@ -852,24 +888,6 @@ rndis_bind_config_vendor(struct usb_configuration *c, u8 ethaddr[ETH_ALEN],
+ 	struct f_rndis	*rndis;
+ 	int		status;
+ 
+-	if (!can_support_rndis(c) || !ethaddr)
+-		return -EINVAL;
+-
+-	if (rndis_string_defs[0].id == 0) {
+-		/* ... and setup RNDIS itself */
+-		status = rndis_init();
+-		if (status < 0)
+-			return status;
+-
+-		status = usb_string_ids_tab(c->cdev, rndis_string_defs);
+-		if (status)
+-			return status;
+-
+-		rndis_control_intf.iInterface = rndis_string_defs[0].id;
+-		rndis_data_intf.iInterface = rndis_string_defs[1].id;
+-		rndis_iad_descriptor.iFunction = rndis_string_defs[2].id;
+-	}
+-
+ 	/* allocate and initialize one new instance */
+ 	status = -ENOMEM;
+ 	rndis = kzalloc(sizeof *rndis, GFP_KERNEL);

@@ -1,0 +1,43 @@
+--- drivers/usb/gadget/u_ether.c
++++ drivers/usb/gadget/u_ether.c
+@@ -87,12 +90,8 @@ struct eth_dev {
+ 
+ #define DEFAULT_QLEN	2	/* double buffering by default */
+ 
+-static unsigned qmult = 5;
+-module_param(qmult, uint, S_IRUGO|S_IWUSR);
+-MODULE_PARM_DESC(qmult, "queue length multiplier at high/super speed");
+-
+ /* for dual-speed hardware, use deeper queues at high/super speed */
+-static inline int qlen(struct usb_gadget *gadget)
++static inline int qlen(struct usb_gadget *gadget, unsigned qmult)
+ {
+ 	if (gadget_is_dualspeed(gadget) && (gadget->speed == USB_SPEED_HIGH ||
+ 					    gadget->speed == USB_SPEED_SUPER))
+@@ -591,7 +590,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
+ 	if (gadget_is_dualspeed(dev->gadget))
+ 		req->no_interrupt = (dev->gadget->speed == USB_SPEED_HIGH ||
+ 				     dev->gadget->speed == USB_SPEED_SUPER)
+-			? ((atomic_read(&dev->tx_qlen) % qmult) != 0)
++			? ((atomic_read(&dev->tx_qlen) % dev->qmult) != 0)
+ 			: 0;
+ 
+ 	retval = usb_ep_queue(in, req, GFP_ATOMIC);
+@@ -721,6 +710,17 @@ static int get_ether_addr(const char *str, u8 *dev_addr)
+ 	return 1;
+ }
+ 
++static int get_ether_addr_str(u8 dev_addr[ETH_ALEN], char *str, int len)
++{
++	if (len < 18)
++		return -EINVAL;
++
++	snprintf(str, len, "%02x:%02x:%02x:%02x:%02x:%02x",
++		 dev_addr[0], dev_addr[1], dev_addr[2],
++		 dev_addr[3], dev_addr[4], dev_addr[5]);
++	return 18;
++}
++
+ static const struct net_device_ops eth_netdev_ops = {
+ 	.ndo_open		= eth_open,
+ 	.ndo_stop		= eth_stop,

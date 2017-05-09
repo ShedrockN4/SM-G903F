@@ -1,0 +1,32 @@
+--- arch/powerpc/kernel/ptrace.c
++++ arch/powerpc/kernel/ptrace.c
+@@ -1431,24 +1422,19 @@ static long ppc_set_hwdebug(struct task_struct *child,
+ 	if (bp_info->trigger_type & PPC_BREAKPOINT_TRIGGER_WRITE)
+ 		brk.type |= HW_BRK_TYPE_WRITE;
+ #ifdef CONFIG_HAVE_HW_BREAKPOINT
+-	if (ptrace_get_breakpoints(child) < 0)
+-		return -ESRCH;
+-
+ 	/*
+ 	 * Check if the request is for 'range' breakpoints. We can
+ 	 * support it if range < 8 bytes.
+ 	 */
+-	if (bp_info->addr_mode == PPC_BREAKPOINT_MODE_RANGE_INCLUSIVE) {
++	if (bp_info->addr_mode == PPC_BREAKPOINT_MODE_RANGE_INCLUSIVE)
+ 		len = bp_info->addr2 - bp_info->addr;
+-	} else if (bp_info->addr_mode != PPC_BREAKPOINT_MODE_EXACT) {
+-		ptrace_put_breakpoints(child);
++	else if (bp_info->addr_mode == PPC_BREAKPOINT_MODE_EXACT)
++		len = 1;
++	else
+ 		return -EINVAL;
+-	}
+ 	bp = thread->ptrace_bps[0];
+-	if (bp) {
+-		ptrace_put_breakpoints(child);
++	if (bp)
+ 		return -ENOSPC;
+-	}
+ 
+ 	/* Create a new breakpoint request if one doesn't exist already */
+ 	hw_breakpoint_init(&attr);

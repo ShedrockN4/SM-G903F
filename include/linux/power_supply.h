@@ -220,6 +220,8 @@ union power_supply_propval {
 	int64_t int64val;
 };
 
+struct device_node;
+
 struct power_supply {
 	const char *name;
 	enum power_supply_type type;
@@ -231,9 +233,7 @@ struct power_supply {
 
 	char **supplied_from;
 	size_t num_supplies;
-#ifdef CONFIG_OF
 	struct device_node *of_node;
-#endif
 
 	int (*get_property)(struct power_supply *psy,
 			    enum power_supply_property psp,

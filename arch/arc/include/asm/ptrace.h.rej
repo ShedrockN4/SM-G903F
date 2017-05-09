@@ -1,0 +1,41 @@
+--- arch/arc/include/asm/ptrace.h
++++ arch/arc/include/asm/ptrace.h
+@@ -44,22 +38,32 @@ struct pt_regs {
+ 	long sp;	/* user/kernel sp depending on where we came from  */
+ 	long orig_r0;
+ 
+-	/*to distinguish bet excp, syscall, irq */
++	/*
++	 * To distinguish bet excp, syscall, irq
++	 * For traps and exceptions, Exception Cause Register.
++	 * 	ECR: <00> <VV> <CC> <PP>
++	 * 	Last word used by Linux for extra state mgmt (syscall-restart)
++	 * For interrupts, use artificial ECR values to note current prio-level
++	 */
+ 	union {
++		struct {
+ #ifdef CONFIG_CPU_BIG_ENDIAN
+-		/* so that assembly code is same for LE/BE */
+-		unsigned long orig_r8:16, event:16;
++			unsigned long state:8, ecr_vec:8,
++				      ecr_cause:8, ecr_param:8;
+ #else
+-		unsigned long event:16, orig_r8:16;
++			unsigned long ecr_param:8, ecr_cause:8,
++				      ecr_vec:8, state:8;
+ #endif
+-		long orig_r8_word;
++		};
++		unsigned long event;
+ 	};
++
++	long user_r25;
+ };
+ 
+ /* Callee saved registers - need to be saved only when you are scheduled out */
+ 
+ struct callee_regs {
+-	long res;	/* Again this is not needed */
+ 	long r25;
+ 	long r24;
+ 	long r23;

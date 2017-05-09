@@ -1,0 +1,10 @@
+--- arch/powerpc/include/asm/perf_event_server.h
++++ arch/powerpc/include/asm/perf_event_server.h
+@@ -61,6 +62,7 @@ struct power_pmu {
+ #define PPMU_HAS_SSLOT		0x00000020 /* Has sampled slot in MMCRA */
+ #define PPMU_HAS_SIER		0x00000040 /* Has SIER */
+ #define PPMU_BHRB		0x00000080 /* has BHRB feature enabled */
++#define PPMU_EBB		0x00000100 /* supports event based branch */
+ 
+ /*
+  * Values for flags to get_alternatives()

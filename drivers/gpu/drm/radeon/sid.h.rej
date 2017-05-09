@@ -1,0 +1,26 @@
+--- drivers/gpu/drm/radeon/sid.h
++++ drivers/gpu/drm/radeon/sid.h
+@@ -457,6 +671,23 @@
+ #define		NOOFGROUPS_SHIFT				12
+ #define		NOOFGROUPS_MASK					0x00001000
+ 
++#define	MC_ARB_DRAM_TIMING				0x2774
++#define	MC_ARB_DRAM_TIMING2				0x2778
++
++#define MC_ARB_BURST_TIME                               0x2808
++#define		STATE0(x)				((x) << 0)
++#define		STATE0_MASK				(0x1f << 0)
++#define		STATE0_SHIFT				0
++#define		STATE1(x)				((x) << 5)
++#define		STATE1_MASK				(0x1f << 5)
++#define		STATE1_SHIFT				5
++#define		STATE2(x)				((x) << 10)
++#define		STATE2_MASK				(0x1f << 10)
++#define		STATE2_SHIFT				10
++#define		STATE3(x)				((x) << 15)
++#define		STATE3_MASK				(0x1f << 15)
++#define		STATE3_SHIFT				15
++
+ #define	MC_SEQ_TRAIN_WAKEUP_CNTL			0x2808
+ #define		TRAIN_DONE_D0      			(1 << 30)
+ #define		TRAIN_DONE_D1      			(1 << 31)

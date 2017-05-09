@@ -1,0 +1,17 @@
+--- drivers/md/bcache/bcache.h
++++ drivers/md/bcache/bcache.h
+@@ -434,9 +431,12 @@ struct bcache_device {
+ 
+ 	/* If nonzero, we're detaching/unregistering from cache set */
+ 	atomic_t		detaching;
++	int			flush_done;
++
++	uint64_t		nr_stripes;
++	unsigned		stripe_size_bits;
++	atomic_t		*stripe_sectors_dirty;
+ 
+-	atomic_long_t		sectors_dirty;
+-	unsigned long		sectors_dirty_gc;
+ 	unsigned long		sectors_dirty_last;
+ 	long			sectors_dirty_derivative;
+ 

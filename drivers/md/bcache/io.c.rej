@@ -1,0 +1,25 @@
+--- drivers/md/bcache/io.c
++++ drivers/md/bcache/io.c
+@@ -78,20 +73,13 @@ struct bio *bch_bio_split(struct bio *bio, int sectors,
+ 
+ 	BUG_ON(sectors <= 0);
+ 
+-	/*
+-	 * If we're being called from underneath generic_make_request() and we
+-	 * already allocated any bios from this bio set, we risk deadlock if we
+-	 * use the mempool. So instead, we possibly fail and let the caller punt
+-	 * to workqueue or somesuch and retry in a safe context.
+-	 */
+-	if (current->bio_list)
+-		gfp &= ~__GFP_WAIT;
+-
+ 	if (sectors >= bio_sectors(bio))
+ 		return bio;
+ 
+ 	if (bio->bi_rw & REQ_DISCARD) {
+ 		ret = bio_alloc_bioset(gfp, 1, bs);
++		if (!ret)
++			return NULL;
+ 		idx = 0;
+ 		goto out;
+ 	}

@@ -1,0 +1,24 @@
+--- arch/arm/mach-u300/timer.c
++++ arch/arm/mach-u300/timer.c
+@@ -18,17 +18,15 @@
+ #include <linux/clk.h>
+ #include <linux/err.h>
+ #include <linux/irq.h>
+-
+-#include <mach/hardware.h>
+-#include <mach/irqs.h>
++#include <linux/delay.h>
++#include <linux/of_address.h>
++#include <linux/of_irq.h>
++#include <linux/sched_clock.h>
+ 
+ /* Generic stuff */
+-#include <asm/sched_clock.h>
+ #include <asm/mach/map.h>
+ #include <asm/mach/time.h>
+ 
+-#include "timer.h"
+-
+ /*
+  * APP side special timer registers
+  * This timer contains four timers which can fire an interrupt each.

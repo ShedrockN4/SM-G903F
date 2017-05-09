@@ -291,9 +291,9 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 		goto out_free;
 	}
 
-	mmc_claim_host(card->host);
+	mmc_get_card(card);
 	err = mmc_send_ext_csd(card, ext_csd);
-	mmc_release_host(card->host);
+	mmc_put_card(card);
 	if (err)
 		goto out_free;
 

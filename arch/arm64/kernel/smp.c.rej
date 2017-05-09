@@ -1,0 +1,25 @@
+--- arch/arm64/kernel/smp.c
++++ arch/arm64/kernel/smp.c
+@@ -71,7 +71,7 @@ static DEFINE_RAW_SPINLOCK(boot_lock);
+  * in coherency or not.  This is necessary for the hotplug code to work
+  * reliably.
+  */
+-static void __cpuinit write_pen_release(u64 val)
++static void write_pen_release(u64 val)
+ {
+ 	void *start = (void *)&secondary_holding_pen_release;
+ 	unsigned long size = sizeof(secondary_holding_pen_release);
+@@ -200,13 +200,6 @@ asmlinkage void __cpuinit secondary_start_kernel(void)
+ 	raw_spin_unlock(&boot_lock);
+ 
+ 	/*
+-	 * Enable local interrupts.
+-	 */
+-	notify_cpu_starting(cpu);
+-	local_irq_enable();
+-	local_fiq_enable();
+-
+-	/*
+ 	 * OK, now it's safe to let the boot CPU continue.  Wait for
+ 	 * the CPU migration code to notice that the CPU is online
+ 	 * before we continue.

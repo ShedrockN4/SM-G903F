@@ -1,0 +1,14 @@
+--- net/sctp/ipv6.c
++++ net/sctp/ipv6.c
+@@ -239,9 +239,8 @@ static int sctp_v6_xmit(struct sk_buff *skb, struct sctp_transport *transport)
+ 		fl6.daddr = *rt0->addr;
+ 	}
+ 
+-	SCTP_DEBUG_PRINTK("%s: skb:%p, len:%d, src:%pI6 dst:%pI6\n",
+-			  __func__, skb, skb->len,
+-			  &fl6.saddr, &fl6.daddr);
++	pr_debug("%s: skb:%p, len:%d, src:%pI6 dst:%pI6\n", __func__, skb,
++		 skb->len, &fl6.saddr, &fl6.daddr);
+ 
+ 	SCTP_INC_STATS(sock_net(sk), SCTP_MIB_OUTSCTPPACKS);
+ 

@@ -1,0 +1,12 @@
+--- arch/arm64/include/asm/device.h
++++ arch/arm64/include/asm/device.h
+@@ -18,6 +18,9 @@
+ 
+ struct dev_archdata {
+ 	struct dma_map_ops *dma_ops;
++#ifdef CONFIG_IOMMU_API
++	void *iommu;			/* private IOMMU data */
++#endif
+ };
+ 
+ struct pdev_archdata {

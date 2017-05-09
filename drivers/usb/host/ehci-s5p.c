@@ -67,6 +67,8 @@ struct s5p_ehci_hcd {
 	unsigned post_lpa_resume:1;
 };
 
+static struct s5p_ehci_platdata empty_platdata;
+
 #define to_s5p_ehci(hcd)      (struct s5p_ehci_hcd *)(hcd_to_ehci(hcd)->priv)
 
 static inline const struct exynos_ehci_drvdata

@@ -1,0 +1,12 @@
+--- drivers/char/mem.c
++++ drivers/char/mem.c
+@@ -822,9 +778,6 @@ static const struct memdev {
+ #ifdef CONFIG_PRINTK
+ 	[11] = { "kmsg", 0644, &kmsg_fops, NULL },
+ #endif
+-#ifdef CONFIG_CRASH_DUMP
+-	[12] = { "oldmem", 0, &oldmem_fops, NULL },
+-#endif
+ };
+ 
+ static int memory_open(struct inode *inode, struct file *filp)

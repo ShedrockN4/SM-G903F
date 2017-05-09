@@ -1,0 +1,34 @@
+--- sound/soc/tegra/tegra20_ac97.c
++++ sound/soc/tegra/tegra20_ac97.c
+@@ -389,27 +379,13 @@ static int tegra20_ac97_platform_probe(struct platform_device *pdev)
+ 	ac97->capture_dma_data.slave_id = of_dma[1];
+ 
+ 	ac97->playback_dma_data.addr = mem->start + TEGRA20_AC97_FIFO_TX1;
+-	ac97->capture_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
+-	ac97->capture_dma_data.maxburst = 4;
+-	ac97->capture_dma_data.slave_id = of_dma[0];
+-
+-	ret = snd_soc_register_component(&pdev->dev, &tegra20_ac97_component,
+-					 &tegra20_ac97_dai, 1);
+-	if (ret) {
+-		dev_err(&pdev->dev, "Could not register DAI: %d\n", ret);
+-		ret = -ENOMEM;
+-		goto err_clk_put;
+-	}
+-
+-	ret = tegra_pcm_platform_register(&pdev->dev);
+-	if (ret) {
+-		dev_err(&pdev->dev, "Could not register PCM: %d\n", ret);
+-		goto err_unregister_component;
+-	}
++	ac97->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
++	ac97->playback_dma_data.maxburst = 4;
++	ac97->playback_dma_data.slave_id = of_dma[1];
+ 
+ 	ret = tegra_asoc_utils_init(&ac97->util_data, &pdev->dev);
+ 	if (ret)
+-		goto err_unregister_pcm;
++		goto err_clk_put;
+ 
+ 	ret = tegra_asoc_utils_set_ac97_rate(&ac97->util_data);
+ 	if (ret)
